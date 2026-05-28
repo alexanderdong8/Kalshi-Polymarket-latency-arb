@@ -29,6 +29,10 @@ def main() -> None:
     run.add_argument("--categories", default="sports,politics,crypto,economics")
     run.add_argument("--max-matches", type=int, default=None)
 
+    doctor = sub.add_parser("doctor", help="Validate configured venue APIs without placing orders")
+    doctor.add_argument("--categories", default="sports")
+    doctor.add_argument("--timeout-seconds", type=float, default=8.0)
+
     sub.add_parser("sample-tui", help="Render a fake dashboard without credentials")
 
     args = parser.parse_args()
@@ -36,6 +40,8 @@ def main() -> None:
         asyncio.run(run_discover(args))
     elif args.command == "run":
         asyncio.run(run_live(args))
+    elif args.command == "doctor":
+        asyncio.run(run_doctor(args))
     elif args.command == "sample-tui":
         sample_tui()
 
@@ -108,6 +114,89 @@ async def run_live(args: argparse.Namespace) -> None:
         await recorder.close()
 
 
+async def run_doctor(args: argparse.Namespace) -> None:
+    settings = Settings.from_env()
+    categories = _parse_categories(args.categories)
+    kalshi_client = KalshiClient(settings)
+    poly_client = PolymarketUSClient(settings)
+
+    print("Credential presence:")
+    print(f"  Kalshi key id: {'present' if settings.kalshi_api_key_id else 'missing'}")
+    print(f"  Kalshi private key: {'present' if settings.kalshi_private_key_path or settings.kalshi_private_key_pem else 'missing'}")
+    print(f"  Polymarket US key id: {'present' if settings.polymarket_key_id else 'missing'}")
+    print(f"  Polymarket US secret key: {'present' if settings.polymarket_secret_key else 'missing'}")
+
+    print("Testing REST endpoints...", flush=True)
+    kalshi_markets = await _doctor_step(
+        "Kalshi REST active markets",
+        kalshi_client.list_active_markets(categories=None, limit=10, timeout_seconds=8, retries=2, max_pages=1),
+    )
+    poly_markets = await _doctor_step(
+        "Polymarket US REST active markets",
+        poly_client.list_active_markets(categories=categories, limit=10, timeout_seconds=8),
+    )
+    kalshi_markets = kalshi_markets or []
+    poly_markets = poly_markets or []
+    print(f"  Kalshi markets fetched: {len(kalshi_markets)}")
+    print(f"  Polymarket US markets fetched: {len(poly_markets)}")
+
+    if poly_markets:
+        await _doctor_step("Polymarket US REST first order book", poly_client.fetch_book(poly_markets[0].stream_key))
+
+    matches = match_markets(
+        kalshi_markets,
+        poly_markets,
+        MatchConfig(min_confidence=settings.min_match_confidence),
+    )[:5]
+    print(f"  Candidate matches from fetched sample: {len(matches)}")
+    for match in matches:
+        print(f"    {match.confidence} | {match.kalshi.title[:48]} <> {match.polymarket_us.title[:48]}")
+
+    print("Testing WebSocket endpoints...", flush=True)
+    if kalshi_markets and settings.kalshi_api_key_id and (settings.kalshi_private_key_path or settings.kalshi_private_key_pem):
+        await _doctor_stream_step(
+            "Kalshi WebSocket first orderbook message",
+            kalshi_client.stream_orderbooks([kalshi_markets[0].stream_key]),
+            timeout_seconds=args.timeout_seconds,
+        )
+    else:
+        print("SKIP Kalshi WebSocket first orderbook message: missing credentials or no market.")
+
+    if poly_markets and settings.polymarket_key_id and settings.polymarket_secret_key:
+        await _doctor_stream_step(
+            "Polymarket US WebSocket first market-data message",
+            poly_client.stream_orderbooks([poly_markets[0].stream_key]),
+            timeout_seconds=args.timeout_seconds,
+        )
+    else:
+        print("SKIP Polymarket US WebSocket first market-data message: missing credentials or no market.")
+
+
+async def _doctor_step(label: str, awaitable):
+    try:
+        result = await awaitable
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAIL {label}: {type(exc).__name__}: {exc}")
+        return None
+    print(f"OK   {label}")
+    return result
+
+
+async def _doctor_stream_step(label: str, stream, timeout_seconds: float) -> None:
+    try:
+        state = await asyncio.wait_for(anext(stream), timeout=timeout_seconds)
+    except StopAsyncIteration:
+        print(f"FAIL {label}: stream ended without data")
+    except asyncio.TimeoutError:
+        print(f"FAIL {label}: timed out after {timeout_seconds:.1f}s")
+    except Exception as exc:  # noqa: BLE001
+        print(f"FAIL {label}: {type(exc).__name__}: {exc}")
+    else:
+        print(f"OK   {label}: {state.venue} {state.market_key}")
+    finally:
+        await stream.aclose()
+
+
 async def discover_matches(settings: Settings, categories: list[str], max_matches: int) -> list[MatchedMarket]:
     kalshi_client = KalshiClient(settings)
     poly_client = PolymarketUSClient(settings)
@@ -176,4 +265,3 @@ def _parse_categories(value: str) -> list[str]:
 
 if __name__ == "__main__":
     main()
-

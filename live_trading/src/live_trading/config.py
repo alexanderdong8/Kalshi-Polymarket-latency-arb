@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -9,10 +10,24 @@ from dotenv import load_dotenv
 
 
 def _load_env_files() -> None:
+    logging.getLogger("dotenv.main").setLevel(logging.ERROR)
     cwd = Path.cwd()
-    for path in (cwd / ".env", cwd.parent / ".env"):
+    for path in (
+        cwd / ".env",
+        cwd.parent / ".env",
+        cwd / "historical_testing" / ".env",
+        cwd.parent / "historical_testing" / ".env",
+    ):
         if path.exists():
             load_dotenv(path, override=False)
+
+
+def _env_any(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
 
 
 def _decimal_env(name: str, default: str) -> Decimal:
@@ -54,14 +69,14 @@ class Settings:
         return cls(
             kalshi_api_base=os.getenv("KALSHI_API_BASE", "https://external-api.kalshi.com/trade-api/v2"),
             kalshi_ws_url=os.getenv("KALSHI_WS_URL", "wss://api.elections.kalshi.com/trade-api/ws/v2"),
-            kalshi_api_key_id=os.getenv("KALSHI_API_KEY_ID") or os.getenv("KALSHI_ACCESS_KEY"),
-            kalshi_private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH"),
-            kalshi_private_key_pem=os.getenv("KALSHI_PRIVATE_KEY_PEM"),
+            kalshi_api_key_id=_env_any("KALSHI_API_KEY_ID", "KALSHI_ACCESS_KEY", "kalshi-api-key-id"),
+            kalshi_private_key_path=_env_any("KALSHI_PRIVATE_KEY_PATH", "kalshi-private-key-path"),
+            kalshi_private_key_pem=_env_any("KALSHI_PRIVATE_KEY_PEM", "kalshi-secret-key"),
             polymarket_gateway_base=os.getenv("POLYMARKET_US_GATEWAY_BASE", "https://gateway.polymarket.us"),
             polymarket_api_base=os.getenv("POLYMARKET_US_API_BASE", "https://api.polymarket.us"),
             polymarket_ws_url=os.getenv("POLYMARKET_US_WS_URL", "wss://api.polymarket.us/v1/ws/markets"),
-            polymarket_key_id=os.getenv("POLYMARKET_US_KEY_ID") or os.getenv("POLYMARKET_KEY_ID"),
-            polymarket_secret_key=os.getenv("POLYMARKET_US_SECRET_KEY") or os.getenv("POLYMARKET_SECRET_KEY"),
+            polymarket_key_id=_env_any("POLYMARKET_US_KEY_ID", "POLYMARKET_KEY_ID", "pm-key-id"),
+            polymarket_secret_key=_env_any("POLYMARKET_US_SECRET_KEY", "POLYMARKET_SECRET_KEY", "pm-secret-key"),
             discovery_refresh_seconds=_int_env("DISCOVERY_REFRESH_SECONDS", 600),
             stale_after_seconds=_decimal_env("STALE_AFTER_SECONDS", "5"),
             max_matches=_int_env("MAX_MATCHES", 100),
@@ -74,4 +89,3 @@ class Settings:
             sqlite_path=os.getenv("LIVE_TRADING_SQLITE_PATH", "live_trading/data/live_trading.sqlite3"),
             tui_refresh_seconds=_decimal_env("TUI_REFRESH_SECONDS", "0.25"),
         )
-

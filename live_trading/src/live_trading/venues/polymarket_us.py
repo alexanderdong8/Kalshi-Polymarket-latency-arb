@@ -50,15 +50,19 @@ class PolymarketUSClient:
         self,
         categories: list[str] | None = None,
         limit: int = 1000,
+        timeout_seconds: float = 30,
+        max_pages: int | None = None,
     ) -> list[VenueMarket]:
         params: dict[str, Any] = {"active": "true", "closed": "false", "limit": min(limit, 500), "offset": 0}
         if categories:
             params["categories"] = ",".join(categories)
         markets: list[VenueMarket] = []
+        pages_seen = 0
         async with aiohttp.ClientSession() as session:
             while len(markets) < limit:
+                pages_seen += 1
                 url = f"{self.settings.polymarket_gateway_base.rstrip('/')}/v1/markets?{urlencode(params)}"
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_seconds)) as resp:
                     resp.raise_for_status()
                     payload = await resp.json()
                 rows = payload.get("markets") if isinstance(payload, dict) else payload
@@ -69,7 +73,7 @@ class PolymarketUSClient:
                     market = market_from_api(raw)
                     if market.active and _category_allowed(market.category, categories):
                         markets.append(market)
-                if len(rows) < int(params["limit"]):
+                if len(rows) < int(params["limit"]) or (max_pages is not None and pages_seen >= max_pages):
                     break
                 params["offset"] = int(params["offset"]) + int(params["limit"])
         return markets[:limit]
@@ -130,4 +134,3 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
-

@@ -4,6 +4,7 @@ historical_testing/reports/
 # Python / virtualenv
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

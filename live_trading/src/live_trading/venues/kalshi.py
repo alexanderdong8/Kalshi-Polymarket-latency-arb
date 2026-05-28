@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 from urllib.parse import urlencode, urlparse
@@ -53,21 +54,35 @@ class KalshiClient:
         self,
         categories: list[str] | None = None,
         limit: int = 1000,
+        timeout_seconds: float = 30,
+        retries: int = 4,
+        max_pages: int | None = None,
     ) -> list[VenueMarket]:
-        params: dict[str, Any] = {"status": "open", "limit": min(limit, 1000)}
+        page_limit = min(max(limit * 4, 100), 1000)
+        params: dict[str, Any] = {"status": "open", "limit": page_limit}
         url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params)}"
         markets: list[VenueMarket] = []
+        pages_seen = 0
         async with aiohttp.ClientSession() as session:
             while url:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    resp.raise_for_status()
-                    payload = await resp.json()
+                pages_seen += 1
+                payload = None
+                for attempt in range(retries):
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_seconds)) as resp:
+                        if resp.status == 429 and attempt < retries - 1:
+                            await asyncio.sleep((1.5 * (attempt + 1)) + random.random())
+                            continue
+                        resp.raise_for_status()
+                        payload = await resp.json()
+                        break
+                if payload is None:
+                    break
                 for raw in payload.get("markets") or []:
                     market = market_from_api(raw)
                     if _category_allowed(market.category, categories):
                         markets.append(market)
                 cursor = payload.get("cursor")
-                if not cursor or len(markets) >= limit:
+                if not cursor or len(markets) >= limit or (max_pages is not None and pages_seen >= max_pages):
                     break
                 url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params | {'cursor': cursor})}"
         return markets[:limit]
@@ -133,4 +148,3 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
-
