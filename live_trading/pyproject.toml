@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "live-trading"
+version = "0.1.0"
+description = "Read-only live Kalshi / Polymarket US matched-market scanner"
+requires-python = ">=3.10"
+dependencies = [
+  "aiohttp>=3.9",
+  "cryptography>=42.0",
+  "python-dotenv>=1.0",
+  "rich>=13.7",
+  "websockets>=14.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+live-trading = "live_trading.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

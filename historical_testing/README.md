@@ -74,16 +74,40 @@ Position:
 - Buy NO on Polymarket at `$0.710`
 - Total cost: `$0.923`
 
+Other prices visible at the same timestamp:
+
+- Kalshi YES bid/ask: `$0.212 / $0.213`
+- Kalshi NO bid/ask: `$0.787 / $0.788`
+- Polymarket YES bid/ask: `$0.290 / $0.360`
+- Polymarket NO bid/ask: `$0.640 / $0.710`
+
 Interpretation:
 
 - If the event happens, the Kalshi YES should pay `$1.00`.
 - If the event does not happen, the Polymarket NO should pay `$1.00`.
 - Total entry cost was `$0.923`, so the raw locked-in spread was `$1.00 - $0.923 = $0.077`.
+- Polymarket's NO ask of `$0.710` implies a YES price of about `$0.290`, while Kalshi YES was askable at `$0.213`.
+- That means Kalshi YES was about `7.7 cents` cheaper than Polymarket's implied YES.
 - Gross edge: `7.7 cents`
 - Estimated net edge after default fees/slippage: `4.4905 cents`
 - Top-of-book depth: `31` contracts
 
 This is one of the cleaner examples because the match warning is `None`.
+
+Within the scanned hour, this gap did not close. From `07:28:04Z` through the last aligned quote at `07:59:53Z`, the executable combination stayed essentially the same:
+
+- Kalshi YES ask stayed around `$0.213`.
+- Polymarket NO ask stayed around `$0.710`.
+- Total entry cost stayed around `$0.923`.
+- Gross edge stayed around `7.7 cents`.
+
+In the later saved PMXT live snapshot, the same market looked much closer:
+
+- Kalshi YES ask: `$0.226`
+- Polymarket NO ask: `$0.780`, implying Polymarket YES near `$0.220`
+- The cross-market gap was then roughly `0.6 cents`, and the direct arbitrage was gone.
+
+So for this example, the exchanges did not converge inside the one-hour historical window, but they did appear much closer in the later saved market snapshot.
 
 ### Clean Example: Venezuela Leader End Of 2026
 
