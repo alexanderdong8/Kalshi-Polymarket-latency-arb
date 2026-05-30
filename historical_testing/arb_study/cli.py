@@ -9,8 +9,10 @@ from .clusters import fetch_cluster_universe, matches_payload, normalize_cluster
 from .config import get_pmxt_api_key
 from .pmxt_client import PMXTClient, dedupe_matches, normalize_pair
 from .report import markdown_summary, write_opportunities_csv
+from .scenario_report import analyze_batch_scan
 from .scanner import scan_matches, scan_matches_batch
 from .serde import matched_market_from_dict, read_json, write_json
+from .official_price_scanner import scan_official_price_histories
 
 
 DEFAULT_CATEGORIES = ["Sports", "Politics", "Crypto", "Economics"]
@@ -71,6 +73,23 @@ def main() -> None:
     report.add_argument("--scan", default="reports/scan.json")
     report.add_argument("--out", default="reports/summary.md")
 
+    scenario_report = sub.add_parser("scenario-report", help="Group an executable batch scan by domain and activity phase")
+    scenario_report.add_argument("--scan", default="reports/batch_scan_2026-05-23T07.json")
+    scenario_report.add_argument("--out-json", default="reports/scenario_analysis.json")
+    scenario_report.add_argument("--out-md", default="reports/scenario_analysis.md")
+    scenario_report.add_argument("--out-csv", default="reports/scenario_analysis.csv")
+
+    official_scan = sub.add_parser("official-price-scan", help="Use official Kalshi/Polymarket historical price APIs for proxy analysis")
+    official_scan.add_argument("--matches", default="data/cluster_matches.json")
+    official_scan.add_argument("--start", required=True)
+    official_scan.add_argument("--end", required=True)
+    official_scan.add_argument("--out", default="reports/official_price_scan.json")
+    official_scan.add_argument("--max-markets", type=int, default=100)
+    official_scan.add_argument("--trade-size", type=int, default=100)
+    official_scan.add_argument("--slippage-buffer", type=float, default=0.005)
+    official_scan.add_argument("--kalshi-fee-mode", choices=["taker", "maker"], default="taker")
+    official_scan.add_argument("--polymarket-fallback-fee-rate", type=float, default=0.05)
+
     sample = sub.add_parser("sample", help="Run a small end-to-end sample")
     sample.add_argument("--out-dir", default="reports/sample")
 
@@ -88,6 +107,10 @@ def main() -> None:
         run_scan_batch(args)
     elif args.command == "report":
         run_report(args)
+    elif args.command == "scenario-report":
+        run_scenario_report(args)
+    elif args.command == "official-price-scan":
+        run_official_price_scan(args)
     elif args.command == "sample":
         run_sample(args)
     elif args.command == "archive-hours":
@@ -215,6 +238,31 @@ def run_report(args: argparse.Namespace) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(markdown_summary(scan), encoding="utf-8")
     print(f"Wrote {args.out}")
+
+
+def run_scenario_report(args: argparse.Namespace) -> None:
+    analyze_batch_scan(args.scan, args.out_json, args.out_md, args.out_csv)
+    print(f"Wrote {args.out_md} and {args.out_json}")
+
+
+def run_official_price_scan(args: argparse.Namespace) -> None:
+    payload = read_json(args.matches)
+    matches = [matched_market_from_dict(item) for item in payload.get("matches", [])]
+    result = scan_official_price_histories(
+        matches,
+        start=args.start,
+        end=args.end,
+        max_markets=args.max_markets,
+        trade_size=args.trade_size,
+        slippage_buffer=args.slippage_buffer,
+        kalshi_fee_mode=args.kalshi_fee_mode,
+        polymarket_fallback_fee_rate=args.polymarket_fallback_fee_rate,
+    )
+    write_json(args.out, result)
+    print(
+        f"Official proxy scanned {result['parameters']['markets_scanned']} markets; "
+        f"opportunities={len(result['opportunities'])}; wrote {args.out}"
+    )
 
 
 def run_sample(args: argparse.Namespace) -> None:

@@ -3,4 +3,4 @@ pyarrow>=14.0
 fsspec>=2024.0
 requests>=2.31
 pytest>=8.0
-
+cryptography>=42.0

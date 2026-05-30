@@ -37,6 +37,14 @@ The current generated historical scan is:
 
 [reports/batch_summary_2026-05-23T07.md](reports/batch_summary_2026-05-23T07.md)
 
+The category/phase summary is:
+
+[reports/scenario_analysis_2026-05-23T07.md](reports/scenario_analysis_2026-05-23T07.md)
+
+The official-API price-history proxy sample is:
+
+[reports/official_price_scan_2026-05-23T07_sample300.json](reports/official_price_scan_2026-05-23T07_sample300.json)
+
 It scans one historical hour:
 
 - Time window: `2026-05-23T07:00:00Z` to `2026-05-23T08:00:00Z`
@@ -53,6 +61,44 @@ This means the scanner found many moments where the reconstructed historical ord
 - Whether both legs could actually fill before either book moved.
 - Whether the quoted top-of-book size is enough for the intended trade.
 - Whether fees, slippage, funding constraints, and exchange latency erase the edge.
+
+The initial category results from the executable orderbook replay were:
+
+- Politics produced the most net-positive windows in this one-hour scan.
+- Popular sports had many matched markets, but fewer fee-positive windows and smaller clean edges than politics/other categories.
+- The best clean sports example was roughly `2.5 cents` estimated net edge.
+- The strongest clean non-sports examples were around `3-4.5 cents` estimated net edge.
+- Active-like/high-volatility sports did show opportunities, but they were short-lived and smaller.
+
+The official API proxy scan over the first `300` matched scenarios found:
+
+- `167` markets with aligned official Kalshi/Polymarket price-history points.
+- `177` proxy gross-positive observations.
+- Clean proxy examples in politics and sports, including a LeBron retirement market around `3.0 cents` estimated net edge.
+- This proxy scan does not prove executable fillability because official historical APIs provide price/candlestick history, not synchronized historical orderbook depth.
+
+## Data Sources And What They Prove
+
+There are two evidence levels in this project:
+
+1. **Official Kalshi/Polymarket API price history**
+   - Kalshi provides official historical markets, trades, and candlesticks.
+   - Polymarket provides official CLOB price-history endpoints.
+   - These are useful for broad screening across many categories and longer date windows.
+   - They do not fully prove an executable arbitrage because historical top-of-book depth is not synchronized across both platforms.
+
+2. **PMXT historical orderbook archive**
+   - PMXT stores hourly orderbook replay data for Kalshi and Polymarket.
+   - This is what we use for executable examples with bid/ask and top-of-book depth.
+   - This is the stronger evidence for “could I have entered both legs at those prices?”
+
+Official docs referenced:
+
+- Polymarket API overview: https://docs.polymarket.com/api-reference/introduction
+- Polymarket price history: https://docs.polymarket.com/api-reference/markets/get-prices-history
+- Polymarket batch price history: https://docs.polymarket.com/api-reference/markets/get-batch-prices-history
+- Kalshi historical markets: https://kalshi-b198743e.mintlify.app/api-reference/historical/get-historical-markets
+- Kalshi trades: https://kalshi-b198743e.mintlify.app/api-reference/market/get-trades
 
 ## Specific Historical Examples
 
@@ -247,6 +293,18 @@ Batch scan many cluster-derived matches by reading each hourly archive once:
 python -m arb_study.cli scan-batch --matches data/cluster_matches.json --start 2026-05-23T07 --end 2026-05-23T08 --out reports/batch_scan.json --csv reports/batch_opportunities.csv
 ```
 
+Create a scenario/category report from a batch orderbook scan:
+
+```powershell
+python -m arb_study.cli scenario-report --scan reports/batch_scan_2026-05-23T07.json --out-json reports/scenario_analysis_2026-05-23T07.json --out-md reports/scenario_analysis_2026-05-23T07.md --out-csv reports/scenario_analysis_2026-05-23T07.csv
+```
+
+Run an official Kalshi/Polymarket price-history proxy scan:
+
+```powershell
+python -m arb_study.cli official-price-scan --matches data/cluster_matches.json --start 2026-05-23T07 --end 2026-05-23T08 --max-markets 300 --out reports/official_price_scan_2026-05-23T07_sample300.json
+```
+
 Find currently indexed overlapping Kalshi/Polymarket v2 archive hours:
 
 ```powershell
@@ -310,3 +368,5 @@ The historical test does show real-looking cross-platform dislocations. In the s
 - Depth matters. A 5-cent edge with only 7 contracts available is less useful than a 3-cent edge with hundreds of contracts available.
 
 The next research step is to run `scan-batch --auto-overlap` across all currently available overlapping archive hours and then manually review the top clean examples with `Match warning: None`.
+
+For multi-month or multi-year research, use the official price-history scan as a broad screen first, then use PMXT orderbook replay where historical orderbook files exist. The official APIs can cover more history, but the PMXT orderbooks are what establish executable depth.
