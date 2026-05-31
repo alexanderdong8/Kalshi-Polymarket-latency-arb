@@ -31,6 +31,40 @@ This tool looks for exactly that pattern in historical PMXT orderbook data.
 
 This is research tooling, not a live trading bot. It is intended to answer whether enough historical opportunities exist before building execution infrastructure.
 
+## What A PMXT Cluster Is
+
+Kalshi and Polymarket each publish their own markets, but they do not provide a shared identifier for the same real-world question. PMXT adds that cross-exchange matching layer.
+
+A **PMXT matched-market cluster** is a group of contracts that PMXT believes refer to the same event, or to closely related events, across one or more venues. For this study, the useful clusters contain at least one Kalshi market and one Polymarket market. The cluster lets the scanner quickly decide which orderbooks should be compared instead of comparing every Kalshi market with every Polymarket market.
+
+Example:
+
+| Venue | Contract |
+|---|---|
+| Kalshi | Will Portugal win the 2026 World Cup? |
+| Polymarket | Will Portugal win the FIFA World Cup 2026? |
+
+PMXT may place these contracts in one cluster so the scanner can compare their prices.
+
+A PMXT cluster is a discovery shortcut, not a guarantee that a trade is safe. Before treating a pair as arbitrage, verify that both contracts have the same outcome meaning, event scope, cutoff date, settlement source, and resolution rule. A related pair such as "reach the Round of 32" versus "reach the Round of 16" must be rejected even if both contracts mention the same team and tournament.
+
+## Live And Historical Orderbooks
+
+An **orderbook** lists the resting buy and sell orders at each price and the quantity available at each level. **Level 2**, usually abbreviated **L2**, means the book includes multiple price levels and their sizes instead of only one displayed price or the best bid and ask.
+
+Both official exchange APIs provide proper live orderbook data:
+
+- Kalshi provides current orderbooks and live WebSocket orderbook updates. Kalshi returns YES and NO bids; the opposite asks are implied. For example, `Kalshi YES ask = 1 - best NO bid`.
+- Polymarket provides current CLOB orderbooks and live WebSocket updates with bids, asks, and sizes for its outcome tokens.
+
+The limitation applies to historical research. The official APIs provide useful historical prices, candlesticks, trades, and market metadata, but they do not expose a synchronized, long-range historical L2 replay for both exchanges that can answer exactly how much size was available on both legs at the same instant.
+
+PMXT fills that research gap by archiving historical orderbook updates and exposing reconstructed L2 books through its archive/API. That is why this project uses:
+
+- Official Kalshi and Polymarket APIs for catalog discovery, broad historical screening, and live-bot design.
+- PMXT clusters to identify cross-exchange candidate pairs.
+- PMXT historical orderbooks to test whether an apparent past arbitrage had executable bid/ask prices and nonzero depth on both legs.
+
 ## Current Findings
 
 The current generated historical scan is:
@@ -443,6 +477,47 @@ The most important report fields are:
 - `resolution_date_warning`: candidate should be manually reviewed before trusting the match.
 
 Small positive gross edges are often not tradable. Kalshi fees are rounded up to the next cent, so trade size materially affects the effective per-contract fee.
+
+### Terminology And The Default 100-Contract Test
+
+The scanner uses `100` paired contracts as its default target order size. One **paired contract** means buying one outcome on one venue and the opposite outcome on the other venue. If the markets are truly identical, that pair pays `$1.00` at resolution because exactly one leg wins.
+
+The scanner tests a target size rather than assuming every visible edge is equally useful:
+
+```text
+executable top-of-book size =
+    min(target size, available size on leg 1, available size on leg 2)
+```
+
+For example:
+
+```text
+Buy Kalshi NO at $0.30:       18 contracts available
+Buy Polymarket YES at $0.50:  70 contracts available
+Default target size:         100 paired contracts
+
+Executable at those exact prices: min(100, 18, 70) = 18 paired contracts
+Gross edge per paired contract:   $1.00 - $0.30 - $0.50 = $0.20
+Gross profit at visible depth:    18 * $0.20 = $3.60 before fees
+```
+
+Important terms:
+
+- `Ask`: the lowest price currently available to buy a leg.
+- `Bid`: the highest price currently available to sell a leg.
+- `Top of book`: the best currently available bid or ask.
+- `Top-of-book depth`: how many paired contracts can be bought at the two displayed best ask prices. It is limited by the smaller leg.
+- `Gross edge per contract`: `$1.00 - leg 1 ask - leg 2 ask`, before fees and slippage.
+- `Net edge per contract`: gross edge minus estimated fees and the configured slippage allowance, expressed per paired contract.
+- `Target order size`: the requested test size, defaulting to `100` paired contracts.
+- `Executable size`: the amount supported by the visible orderbook. This can be smaller than the target order size.
+- `Slippage`: the extra cost incurred when the best price lacks enough depth and the order must consume worse price levels.
+- `L2 orderbook`: multiple price levels and sizes, which are needed to estimate slippage for larger orders.
+- `Partial-fill risk`: the risk that one exchange fills while the hedge order on the other exchange does not.
+- `Proxy signal`: an apparent edge based on aligned official historical prices. It is useful for screening but does not prove executable depth.
+- `Executable opportunity`: an apparent edge reconstructed from historical orderbooks with nonzero ask depth on both legs. It is stronger evidence, but it still does not prove that a live bot would have won the race to fill both orders.
+
+The reports should be read at multiple target sizes such as `1`, `5`, `10`, `25`, `50`, `100`, and `250` contracts. The `100`-contract default is a useful baseline, not a claim that every reported opportunity could fill `100` contracts at its displayed prices.
 
 ### What Median Net Window Means
 
