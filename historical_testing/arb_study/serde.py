@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,10 +24,19 @@ class EnhancedJSONEncoder(json.JSONEncoder):
 def write_json(path: str | Path, data: Any) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
+    temporary = target.with_suffix(f"{target.suffix}.tmp")
+    temporary.write_text(
         json.dumps(data, cls=EnhancedJSONEncoder, indent=2, sort_keys=True),
         encoding="utf-8",
     )
+    for attempt in range(6):
+        try:
+            temporary.replace(target)
+            break
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.25 * (attempt + 1))
 
 
 def read_json(path: str | Path) -> Any:
@@ -73,4 +83,3 @@ def _outcome_from_dict(raw: dict[str, Any]) -> OutcomeRef:
 
 def opportunity_from_dict(raw: dict[str, Any]) -> Opportunity:
     return Opportunity(**raw)
-

@@ -55,7 +55,7 @@ def scan_official_price_histories(
         tags = list(match.polymarket.raw.get("tags") or []) + list(match.kalshi.raw.get("tags") or [])
         domain = classify_domain(title, category, tags)
         try:
-            kalshi_rows = kalshi.market_candlesticks(match.kalshi.slug or match.kalshi.yes.outcome_id, start_ts, end_ts, 1)
+            kalshi_rows = kalshi.market_candlesticks_auto(match.kalshi.slug or match.kalshi.yes.outcome_id, start_ts, end_ts, 1)
             poly_yes = poly.prices_history(match.polymarket.yes.outcome_id, start_ts, end_ts, 1)
             poly_no = poly.prices_history(match.polymarket.no.outcome_id, start_ts, end_ts, 1)
             states = _align_official_series(kalshi_rows, poly_yes, poly_no)
@@ -142,16 +142,17 @@ def _align_official_series(
     kalshi_rows: list[dict[str, Any]],
     poly_yes_rows: list[dict[str, Any]],
     poly_no_rows: list[dict[str, Any]],
+    bucket_seconds: int = 60,
 ) -> list[dict[str, Any]]:
     kalshi_series = {
-        _minute_bucket(int(row["end_period_ts"])): {
-            "kalshi_yes_ask": _nested_float(row, "yes_ask", "close_dollars"),
-            "kalshi_yes_bid": _nested_float(row, "yes_bid", "close_dollars"),
+        _time_bucket(int(row["end_period_ts"]), bucket_seconds): {
+            "kalshi_yes_ask": _nested_float(row, "yes_ask", "close_dollars", "close"),
+            "kalshi_yes_bid": _nested_float(row, "yes_bid", "close_dollars", "close"),
         }
         for row in kalshi_rows
     }
-    poly_yes = {_minute_bucket(int(row["t"])): float(row["p"]) for row in poly_yes_rows if row.get("p") is not None}
-    poly_no = {_minute_bucket(int(row["t"])): float(row["p"]) for row in poly_no_rows if row.get("p") is not None}
+    poly_yes = {_time_bucket(int(row["t"]), bucket_seconds): float(row["p"]) for row in poly_yes_rows if row.get("p") is not None}
+    poly_no = {_time_bucket(int(row["t"]), bucket_seconds): float(row["p"]) for row in poly_no_rows if row.get("p") is not None}
     timestamps = sorted(set(kalshi_series) & set(poly_yes) & set(poly_no))
     states = []
     for ts in timestamps:
@@ -226,15 +227,21 @@ def _evaluate_proxy_state(
     return out
 
 
-def _nested_float(row: dict[str, Any], key: str, child: str) -> float | None:
-    value = (row.get(key) or {}).get(child)
-    if value is None:
-        return None
-    return float(value)
+def _nested_float(row: dict[str, Any], key: str, *children: str) -> float | None:
+    nested = row.get(key) or {}
+    for child in children:
+        value = nested.get(child)
+        if value is not None:
+            return float(value)
+    return None
+
+
+def _time_bucket(timestamp: int, bucket_seconds: int) -> int:
+    return timestamp - (timestamp % bucket_seconds)
 
 
 def _minute_bucket(timestamp: int) -> int:
-    return timestamp - (timestamp % 60)
+    return _time_bucket(timestamp, 60)
 
 
 def _to_unix(value: str) -> int:

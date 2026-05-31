@@ -14,6 +14,7 @@ from .config import load_dotenv
 
 
 POLYMARKET_CLOB_BASE = "https://clob.polymarket.com"
+POLYMARKET_GAMMA_BASE = "https://gamma-api.polymarket.com"
 KALSHI_BASE = "https://external-api.kalshi.com/trade-api/v2"
 
 
@@ -76,6 +77,48 @@ class PolymarketOfficialClient:
         raise RuntimeError(f"Polymarket official API failed: {last_error}") from last_error
 
 
+class PolymarketGammaClient:
+    def __init__(self, base_url: str = POLYMARKET_GAMMA_BASE, retries: int = 3) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.retries = retries
+        self.session = requests.Session()
+
+    def market_page(
+        self,
+        start: str,
+        end: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        closed: bool = True,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "closed": str(closed).lower(),
+            "limit": limit,
+            "end_date_min": start,
+            "end_date_max": end,
+        }
+        if cursor:
+            params["after_cursor"] = cursor
+        return self._get("/markets/keyset", params)
+
+    def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        last_error: Exception | None = None
+        for attempt in range(self.retries):
+            try:
+                response = self.session.get(url, params=params, timeout=30)
+                if response.status_code in {429, 500, 502, 503, 504}:
+                    time.sleep(1.5 * (attempt + 1))
+                    response.raise_for_status()
+                response.raise_for_status()
+                return response.json()
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if attempt < self.retries - 1:
+                    time.sleep(1.5 * (attempt + 1))
+        raise RuntimeError(f"Polymarket Gamma API failed: {last_error}") from last_error
+
+
 class KalshiOfficialClient:
     def __init__(
         self,
@@ -112,18 +155,97 @@ class KalshiOfficialClient:
         )
         return list(data.get("candlesticks") or [])
 
+    def historical_market_candlesticks(
+        self,
+        market_ticker: str,
+        start_ts: int,
+        end_ts: int,
+        period_interval: int = 1,
+    ) -> list[dict[str, Any]]:
+        data = self._get(
+            f"/historical/markets/{market_ticker}/candlesticks",
+            {
+                "start_ts": start_ts,
+                "end_ts": end_ts,
+                "period_interval": period_interval,
+            },
+        )
+        return list(data.get("candlesticks") or [])
+
+    def market_candlesticks_auto(
+        self,
+        market_ticker: str,
+        start_ts: int,
+        end_ts: int,
+        period_interval: int = 1,
+    ) -> list[dict[str, Any]]:
+        try:
+            return self.market_candlesticks(market_ticker, start_ts, end_ts, period_interval)
+        except RuntimeError:
+            return self.historical_market_candlesticks(market_ticker, start_ts, end_ts, period_interval)
+
+    def events(
+        self,
+        limit: int = 200,
+        cursor: str | None = None,
+        status: str | None = None,
+        min_close_ts: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        if status:
+            params["status"] = status
+        if min_close_ts:
+            params["min_close_ts"] = min_close_ts
+        return self._get("/events", params)
+
+    def event(self, event_ticker: str) -> dict[str, Any]:
+        return self._get(f"/events/{event_ticker}", {})
+
+    def historical_cutoff(self) -> dict[str, Any]:
+        return self._get("/historical/cutoff", {})
+
     def historical_markets(
         self,
         limit: int = 1000,
         cursor: str | None = None,
         series_ticker: str | None = None,
+        min_close_ts: int | None = None,
+        max_close_ts: int | None = None,
+        mve_filter: str | None = "exclude",
     ) -> dict[str, Any]:
         params: dict[str, Any] = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
         if series_ticker:
             params["series_ticker"] = series_ticker
+        if min_close_ts:
+            params["min_close_ts"] = min_close_ts
+        if max_close_ts:
+            params["max_close_ts"] = max_close_ts
+        if mve_filter:
+            params["mve_filter"] = mve_filter
         return self._get("/historical/markets", params)
+
+    def markets(
+        self,
+        limit: int = 1000,
+        cursor: str | None = None,
+        min_close_ts: int | None = None,
+        max_close_ts: int | None = None,
+        mve_filter: str | None = "exclude",
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        if min_close_ts:
+            params["min_close_ts"] = min_close_ts
+        if max_close_ts:
+            params["max_close_ts"] = max_close_ts
+        if mve_filter:
+            params["mve_filter"] = mve_filter
+        return self._get("/markets", params)
 
     def trades(
         self,

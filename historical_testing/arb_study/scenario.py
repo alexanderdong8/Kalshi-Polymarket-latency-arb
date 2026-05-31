@@ -66,6 +66,20 @@ ECON_WORDS = {
     "crypto",
 }
 
+SPORT_SUBCATEGORY_WORDS = [
+    ("sports_basketball", {"basketball", "nba", "wnba", "ncaa", "euroleague"}),
+    ("sports_tennis", {"tennis", "atp", "wta", "wimbledon", "roland garros", "us open"}),
+    ("sports_motorsport", {"formula 1", "formula one", "f1", "nascar", "indycar", "grand prix"}),
+    ("sports_baseball", {"baseball", "mlb", "world series"}),
+    ("sports_american_football", {"nfl", "super bowl", "american football"}),
+    ("sports_soccer", {"soccer", "premier league", "champions league", "world cup", "uefa", "fifa"}),
+    ("sports_hockey", {"hockey", "nhl", "stanley cup"}),
+    ("sports_mma_boxing", {"ufc", "mma", "boxing"}),
+    ("sports_golf", {"golf", "pga", "masters"}),
+    ("sports_cricket", {"cricket"}),
+    ("sports_chess", {"chess"}),
+]
+
 
 def classify_domain(title: str, category: str | None = None, tags: list[str] | None = None) -> str:
     haystack = _norm(" ".join([title, category or "", " ".join(tags or [])]))
@@ -80,6 +94,27 @@ def classify_domain(title: str, category: str | None = None, tags: list[str] | N
     if any(word in haystack for word in ["movie", "album", "oscars", "avengers", "tv", "music"]):
         return "entertainment"
     return "other"
+
+
+def classify_scenario(title: str, category: str | None = None, tags: list[str] | None = None) -> str:
+    haystack = _norm(" ".join([title, category or "", " ".join(tags or [])]))
+    for label, words in SPORT_SUBCATEGORY_WORDS:
+        if any(word in haystack for word in words):
+            return label
+    domain = classify_domain(title, category, tags)
+    if domain.startswith("sports_"):
+        return "sports_other"
+    if domain == "politics":
+        if any(word in haystack for word in ["election", "primary", "nominee", "president", "senate", "governor", "mayor"]):
+            return "politics_elections"
+        return "politics_other"
+    if domain == "economics_crypto":
+        if any(word in haystack for word in ["bitcoin", "crypto", "ethereum", "solana", "doge"]):
+            return "crypto"
+        if any(word in haystack for word in ["fed", "rate", "cpi", "inflation", "gdp", "unemployment", "jobs"]):
+            return "economics_macro"
+        return "economics_financial"
+    return domain
 
 
 def classify_phase(

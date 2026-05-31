@@ -4,7 +4,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from .scenario import classify_domain, classify_phase, summarize_records
+from .scenario import classify_domain, classify_phase, classify_scenario, summarize_records
 from .serde import read_json, write_json
 
 
@@ -20,6 +20,7 @@ def analyze_batch_scan(
     for market in scan.get("markets", []):
         title = f"{market.get('polymarket_title', '')} {market.get('kalshi_title', '')}"
         domain = classify_domain(title)
+        scenario = classify_scenario(title)
         phase = classify_phase(
             title=title,
             scan_start=scan_start,
@@ -28,9 +29,12 @@ def analyze_batch_scan(
             best_gross_edge=market.get("best_gross_edge_per_contract"),
             median_window_seconds=market.get("median_net_window_seconds"),
         )
-        records.append({**market, "domain": domain, "phase": phase})
+        records.append({**market, "domain": domain, "scenario": scenario, "phase": phase})
 
     bucket_summary = summarize_records(records)
+    scenario_summary = summarize_records(
+        [{**record, "domain": record["scenario"]} for record in records]
+    )
     top_clean = [
         record
         for record in sorted(records, key=lambda item: item.get("best_net_edge_per_contract") or -999, reverse=True)
@@ -46,6 +50,7 @@ def analyze_batch_scan(
         "parameters": scan.get("parameters", {}),
         "overall_summary": scan.get("summary", {}),
         "bucket_summary": bucket_summary,
+        "scenario_summary": scenario_summary,
         "top_clean_markets": top_clean,
         "top_sports_markets": top_sports,
         "records": records,
@@ -92,6 +97,17 @@ def _markdown(result: dict[str, Any]) -> str:
             f"max net edge `{_fmt(row.get('max_best_net_edge'))}`"
         )
 
+    lines.extend(["", "## Detailed Scenarios", ""])
+    for row in result.get("scenario_summary", []):
+        lines.append(
+            "- "
+            f"{row['domain']} / {row['phase']}: "
+            f"{row['markets']} markets, "
+            f"{row['markets_with_net_positive_windows']} with net-positive windows, "
+            f"{row['net_positive_windows']} net windows, "
+            f"max net edge `{_fmt(row.get('max_best_net_edge'))}`"
+        )
+
     lines.extend(["", "## Top Clean Markets", ""])
     for row in result.get("top_clean_markets", [])[:10]:
         lines.extend(_market_lines(row))
@@ -124,6 +140,7 @@ def _write_csv(path: str | Path, records: list[dict[str, Any]]) -> None:
     fields = [
         "match_id",
         "domain",
+        "scenario",
         "phase",
         "polymarket_title",
         "kalshi_title",

@@ -41,9 +41,25 @@ The category/phase summary is:
 
 [reports/scenario_analysis_2026-05-23T07.md](reports/scenario_analysis_2026-05-23T07.md)
 
+The combined annual proxy and executable scenario research is:
+
+[ANNUAL_SCENARIO_ANALYSIS.md](ANNUAL_SCENARIO_ANALYSIS.md)
+
 The official-API price-history proxy sample is:
 
 [reports/official_price_scan_2026-05-23T07_sample300.json](reports/official_price_scan_2026-05-23T07_sample300.json)
+
+The reachable longer-window official-API proxy report is:
+
+[reports/annual_official_proxy_12m.md](reports/annual_official_proxy_12m.md)
+
+The 12-month official catalog coverage audit is:
+
+[reports/monthly_12m_coverage.md](reports/monthly_12m_coverage.md)
+
+The executable-window fillability proxy is:
+
+[reports/fillability_analysis_2026-05-23T07.md](reports/fillability_analysis_2026-05-23T07.md)
 
 It scans one historical hour:
 
@@ -77,6 +93,27 @@ The official API proxy scan over the first `300` matched scenarios found:
 - Clean proxy examples in politics and sports, including a LeBron retirement market around `3.0 cents` estimated net edge.
 - This proxy scan does not prove executable fillability because official historical APIs provide price/candlestick history, not synchronized historical orderbook depth.
 
+The longer-window official proxy replay currently covers the strict recent matches that the checkpointed catalog crawl could reach:
+
+- Strict catalog matches replayed: `45`
+- Months with replayed strict matches: April and May 2026
+- Aligned official price/candlestick points: `3,548`
+- Fee/slippage-positive proxy snapshots: `609`
+- Proxy windows: `235`
+- Markets with proxy signals: `10`
+
+This is **not** a completed 12-month arbitrage result. The coverage audit is the authoritative status for the year-scale crawl.
+
+The bounded 12-month official-catalog screen covering `2025-05-30T00:00:00Z` through `2026-05-30T00:00:00Z` found:
+
+- `6,125` Kalshi events and `12,771` Polymarket markets screened under explicit page caps.
+- `45` conservative catalog pairs after semantic filtering.
+- All `45` audited pairs scanned across pre-event and near-resolution windows.
+- `609` fee/slippage-positive proxy signals.
+- The audited annual sample is concentrated in election markets, so it cannot establish a 12-month sports ranking.
+
+The detailed executable sports breakdown for the saved PMXT hour found fee-positive windows in baseball and active MMA/boxing. Basketball, tennis, and motorsport did not produce fee-positive windows in that one-hour replay. Treat that as a short-horizon result, not a universal sports ranking.
+
 ## Data Sources And What They Prove
 
 There are two evidence levels in this project:
@@ -91,13 +128,30 @@ There are two evidence levels in this project:
    - PMXT stores hourly orderbook replay data for Kalshi and Polymarket.
    - This is what we use for executable examples with bid/ask and top-of-book depth.
    - This is the stronger evidence for “could I have entered both legs at those prices?”
+   - The currently indexed overlap audit found `50` Kalshi/Polymarket v2 hours, from `2026-05-23T07` through `2026-05-25T08`. That is enough for an executable-depth study over those hours, but not enough to claim a 12-month executable replay.
+
+### Current 12-Month Coverage Limit
+
+The official Kalshi historical-market endpoint is cursor-paginated and does not expose close-time range filtering. Short-duration contracts dominate the archive.
+
+The resumable crawl currently records:
+
+- Kalshi historical pages crawled: `63`
+- Kalshi archived contracts crawled: `63,000`
+- Oldest Kalshi close time reached: `2026-03-28T12:00:00Z`
+- Requested start date: `2025-05-30T00:00:00Z`
+
+So the crawler is implemented and resumable, but it has not reached the oldest requested months yet. Older monthly rows in the coverage report are intentionally marked incomplete instead of being filled with invented statistics.
 
 Official docs referenced:
 
 - Polymarket API overview: https://docs.polymarket.com/api-reference/introduction
+- Polymarket Gamma catalog overview: https://docs.polymarket.com/developers/gamma-markets-api/overview
 - Polymarket price history: https://docs.polymarket.com/api-reference/markets/get-prices-history
 - Polymarket batch price history: https://docs.polymarket.com/api-reference/markets/get-batch-prices-history
+- Kalshi historical data overview: https://docs.kalshi.com/getting_started/historical_data
 - Kalshi historical markets: https://kalshi-b198743e.mintlify.app/api-reference/historical/get-historical-markets
+- Kalshi historical candlesticks: https://docs.kalshi.com/api-reference/historical/get-historical-market-candlesticks
 - Kalshi trades: https://kalshi-b198743e.mintlify.app/api-reference/market/get-trades
 
 ## Specific Historical Examples
@@ -305,6 +359,38 @@ Run an official Kalshi/Polymarket price-history proxy scan:
 python -m arb_study.cli official-price-scan --matches data/cluster_matches.json --start 2026-05-23T07 --end 2026-05-23T08 --max-markets 300 --out reports/official_price_scan_2026-05-23T07_sample300.json
 ```
 
+Discover conservative official-catalog matches across the prior 12 months:
+
+```powershell
+python -m arb_study.cli discover-official-history --start 2025-05-30T00:00:00Z --end 2026-05-30T00:00:00Z --cache data/official_history_event_cache_12m.json --out data/official_history_matches_12m.json
+```
+
+Run the stratified 12-month official-API proxy report:
+
+```powershell
+python -m arb_study.cli annual-proxy-report --matches data/official_history_matches_12m.json --start 2025-05-30T00:00:00Z --end 2026-05-30T00:00:00Z --out-json reports/annual_official_proxy_12m.json --out-md reports/annual_official_proxy_12m.md
+```
+
+The annual report groups matched markets by month, scenario, and timing regime. Its default sample rotates across available scenario buckets within each month. Set `--max-markets-per-month 0` to scan every discovered match.
+
+Continue the cursor-based official catalog crawl and refresh its coverage audit:
+
+```powershell
+python -m arb_study.historical_monthly --collect --coverage-only --coverage-md reports/monthly_12m_coverage.md --start 2025-05-30T00:00:00Z --end 2026-05-30T00:00:00Z --cache data/monthly_12m_cache.json --out data/monthly_12m_matches.json --kalshi-historical-pages 25 --kalshi-current-pages-per-month 2 --polymarket-pages-per-month 5
+```
+
+Each run advances another capped cursor batch and writes a checkpoint after every Kalshi historical page. Once the audit says the requested Kalshi history is complete, normalize the monthly cache:
+
+```powershell
+python -m arb_study.historical_monthly --coverage-md reports/monthly_12m_coverage.md --start 2025-05-30T00:00:00Z --end 2026-05-30T00:00:00Z --cache data/monthly_12m_cache.json --out data/monthly_12m_matches.json
+```
+
+Create the executable-window order-size report:
+
+```powershell
+python -m arb_study.cli fillability-report --scan reports/batch_scan_2026-05-23T07.json --out-json reports/fillability_analysis_2026-05-23T07.json --out-md reports/fillability_analysis_2026-05-23T07.md
+```
+
 Find currently indexed overlapping Kalshi/Polymarket v2 archive hours:
 
 ```powershell
@@ -357,6 +443,59 @@ The most important report fields are:
 - `resolution_date_warning`: candidate should be manually reviewed before trusting the match.
 
 Small positive gross edges are often not tradable. Kalshi fees are rounded up to the next cent, so trade size materially affects the effective per-contract fee.
+
+### What Median Net Window Means
+
+A `net-positive window` is a contiguous period where the reconstructed executable order books continued to show an edge after default fees and slippage. Nearby quote updates are grouped into the same window when the gap between updates is no more than `5` seconds.
+
+The current one-hour PMXT replay has:
+
+- `3,255` fee/slippage-positive windows.
+- Median net window: `0.352 seconds`.
+
+That means half of those windows lasted less than `0.352 seconds`, and half lasted longer. It does **not** mean an order has a `50%` fill chance in `0.352` seconds. Some windows have `0.000 seconds` duration because the edge appeared in only one reconstructed quote update.
+
+### Order Size And Fillability Proxy
+
+The fillability report asks a narrower question:
+
+> For a target order size, how many historical net-positive windows quoted enough top-of-book liquidity on both legs, and how long did those windows remain visible?
+
+Current one-hour executable replay:
+
+| Order size | Windows with enough quoted depth | Share of net windows | Of eligible windows lasting at least 1 second |
+|---:|---:|---:|---:|
+| `1` contract | `3,208` | `98.56%` | `38.28%` |
+| `5` contracts | `2,865` | `88.02%` | `37.24%` |
+| `10` contracts | `2,412` | `74.10%` | `37.27%` |
+| `25` contracts | `2,137` | `65.65%` | `35.61%` |
+| `50` contracts | `1,773` | `54.47%` | `37.73%` |
+| `100` contracts | `1,468` | `45.10%` | `36.10%` |
+| `250` contracts | `1,078` | `33.12%` | `39.89%` |
+
+These are optimistic coverage statistics, not realized fill probabilities. They do not model exchange queue position, network delay, competing bots, adverse selection, or the chance that only one hedge leg fills.
+
+For example, the reactor opportunity quoted `31` contracts of limiting top-of-book depth. The reconstructed books support the claim that roughly `10` or `25` contracts were visible at the displayed prices. They do not support a claim that a `50`-contract trade could enter at the same prices, and they still do not prove that both legs would have filled before either quote moved.
+
+The annual proxy report uses a separate vocabulary:
+
+- `Proxy signal`: an aligned official-price snapshot where the opposite-outcome pair remains profitable after configured fees and slippage.
+- `Signal share`: fee/slippage-positive directions divided by all aligned directions tested in that report bucket.
+- `Net-positive window`: consecutive proxy-signal snapshots. In the executable PMXT replay, windows are quote-event windows. In the annual official-API report, they are candle/price-history proxy windows.
+- `Mean net edge on positive points`: average estimated profit per `$1.00` payout pair among positive proxy snapshots only. It does not include periods with no signal.
+- `Pre-event proxy`: the sampled period from seven days to six hours before the event closes.
+- `Near-resolution or in-play proxy`: the sampled period from six hours before close through one hour after close. For sports, this may include in-play updates; the official APIs do not label each minute as live or pregame.
+
+The annual official-catalog matcher is intentionally conservative, but title similarity is not enough to authorize a trade. Every candidate still needs a manual rulebook review.
+
+The current longer-window report contains a useful screening example:
+
+- At `2026-05-23T07:00:00Z`, the official price histories showed Polymarket YES on Everett Jackson winning the TX-30 Republican nomination at `$0.514` and Kalshi NO at `$0.080`.
+- Proxy pair cost: `$0.594`
+- Gross proxy edge: `40.6 cents`
+- Estimated net proxy edge after defaults: `37.831 cents`
+
+This is a reason to inspect the market manually. It is not executable proof because the official histories do not show synchronized depth, and the resolution rules still need manual verification.
 
 ## Bottom Line
 
