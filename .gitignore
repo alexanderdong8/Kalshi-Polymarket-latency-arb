@@ -2,6 +2,7 @@
 historical_testing/reports/
 historical_testing/data/official_history_*
 historical_testing/data/monthly_12m_*
+live_trading/data/
 
 # Python / virtualenv
 __pycache__/

@@ -60,8 +60,13 @@ class Settings:
     trade_size: int
     kalshi_fee_mode: str
     polymarket_taker_theta: Decimal
-    sqlite_path: str
+    live_data_dir: str
+    live_data_quota_bytes: int
+    live_data_low_watermark_bytes: int
+    snapshot_interval_seconds: Decimal
+    routine_queue_maxsize: int
     tui_refresh_seconds: Decimal
+    metrics_write_seconds: Decimal
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -86,6 +91,11 @@ class Settings:
             trade_size=_int_env("TRADE_SIZE", 100),
             kalshi_fee_mode=os.getenv("KALSHI_FEE_MODE", "taker"),
             polymarket_taker_theta=_decimal_env("POLYMARKET_TAKER_THETA", "0.05"),
-            sqlite_path=os.getenv("LIVE_TRADING_SQLITE_PATH", "live_trading/data/live_trading.sqlite3"),
+            live_data_dir=os.getenv("LIVE_TRADING_DATA_DIR", "live_trading/data"),
+            live_data_quota_bytes=_int_env("LIVE_DATA_QUOTA_BYTES", 3 * 1024**3),
+            live_data_low_watermark_bytes=_int_env("LIVE_DATA_LOW_WATERMARK_BYTES", 2_700 * 1024**2),
+            snapshot_interval_seconds=_decimal_env("SNAPSHOT_INTERVAL_SECONDS", "30"),
+            routine_queue_maxsize=_int_env("ROUTINE_QUEUE_MAXSIZE", 20_000),
             tui_refresh_seconds=_decimal_env("TUI_REFRESH_SECONDS", "0.25"),
+            metrics_write_seconds=_decimal_env("METRICS_WRITE_SECONDS", "10"),
         )

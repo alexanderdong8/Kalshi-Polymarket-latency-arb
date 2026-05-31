@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+import time
 from typing import Any, Literal
 
 
@@ -74,6 +75,7 @@ class BookState:
     received_ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sequence: int | None = None
     state: str | None = None
+    received_monotonic_ns: int = field(default_factory=time.perf_counter_ns)
 
     def age_seconds(self, now: datetime | None = None) -> Decimal:
         current = now or datetime.now(timezone.utc)
@@ -101,4 +103,3 @@ class ArbOpportunity:
     polymarket_received_ts: datetime
     detected_ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     warnings: tuple[str, ...] = ()
-

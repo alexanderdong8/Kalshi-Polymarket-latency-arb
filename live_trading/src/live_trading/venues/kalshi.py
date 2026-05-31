@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 from urllib.parse import urlencode, urlparse
@@ -14,6 +15,7 @@ from ..auth import kalshi_headers, read_private_key
 from ..books import KalshiOrderBook, parse_ts
 from ..config import Settings
 from ..models import BookState, VenueMarket
+from ..shards import merge_sharded_streams, shard_items
 
 
 def market_from_api(raw: dict[str, Any]) -> VenueMarket:
@@ -91,34 +93,38 @@ class KalshiClient:
         self,
         tickers: list[str],
         batch_size: int = 100,
+        on_reconnect=None,
     ) -> AsyncIterator[BookState]:
         if not tickers:
             return
         headers = self._ws_headers()
-        books = {ticker: KalshiOrderBook(ticker) for ticker in tickers}
-        while True:
-            try:
-                for batch in _chunks(tickers, batch_size):
-                    async for state in self._stream_batch(batch, books, headers):
-                        yield state
-            except Exception:
-                await asyncio.sleep(2)
+        shards = shard_items(tickers, min(batch_size, 100))
+
+        async def worker(batch: list[str], shard_id: int) -> AsyncIterator[BookState]:
+            books = {ticker: KalshiOrderBook(ticker, use_yes_price=True) for ticker in batch}
+            async for state in self._stream_batch(batch, books, headers, shard_id):
+                yield state
+
+        async for state in merge_sharded_streams(shards, worker, on_reconnect=on_reconnect):
+            yield state
 
     async def _stream_batch(
         self,
         tickers: list[str],
         books: dict[str, KalshiOrderBook],
         headers: dict[str, str],
+        shard_id: int = 0,
     ) -> AsyncIterator[BookState]:
         subscribe = {
-            "id": 1,
+            "id": shard_id + 1,
             "cmd": "subscribe",
-            "params": {"channels": ["orderbook_delta"], "market_tickers": tickers},
+            "params": {"channels": ["orderbook_delta"], "market_tickers": tickers, "use_yes_price": True},
         }
         async with websockets.connect(self.settings.kalshi_ws_url, additional_headers=headers) as ws:
             await ws.send(json.dumps(subscribe))
             async for raw_message in ws:
                 received = datetime.now(timezone.utc)
+                received_monotonic_ns = time.perf_counter_ns()
                 payload = json.loads(raw_message)
                 msg = payload.get("msg") or {}
                 ticker = msg.get("market_ticker")
@@ -126,9 +132,27 @@ class KalshiClient:
                     continue
                 book = books.setdefault(str(ticker), KalshiOrderBook(str(ticker)))
                 if payload.get("type") == "orderbook_snapshot":
-                    yield book.apply_snapshot(payload, received_ts=received)
+                    yield book.apply_snapshot(
+                        payload,
+                        received_ts=received,
+                        received_monotonic_ns=received_monotonic_ns,
+                    )
                 elif payload.get("type") == "orderbook_delta":
-                    yield book.apply_delta(payload, received_ts=received)
+                    yield book.apply_delta(
+                        payload,
+                        received_ts=received,
+                        received_monotonic_ns=received_monotonic_ns,
+                    )
+
+    @staticmethod
+    def subscription_update_message(sid: int, tickers: list[str], action: str, request_id: int = 1) -> dict[str, Any]:
+        if action not in {"add_markets", "delete_markets", "get_snapshot"}:
+            raise ValueError(f"Unsupported Kalshi subscription action: {action}")
+        return {
+            "id": request_id,
+            "cmd": "update_subscription",
+            "params": {"sid": sid, "market_tickers": tickers, "action": action},
+        }
 
     def _ws_headers(self) -> dict[str, str]:
         if not self.settings.kalshi_api_key_id or not self.private_key_pem:
@@ -144,7 +168,3 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
         return False
     wanted = {item.strip().lower() for item in categories}
     return category.lower() in wanted
-
-
-def _chunks(items: list[str], size: int) -> list[list[str]]:
-    return [items[index : index + size] for index in range(0, len(items), size)]

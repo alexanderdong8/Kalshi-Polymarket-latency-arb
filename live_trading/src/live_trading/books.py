@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+import time
 from typing import Any
 
 from .fees import decimal
@@ -65,32 +66,47 @@ def _best(levels: tuple[PriceLevel, ...]) -> PriceLevel | None:
 @dataclass
 class KalshiOrderBook:
     market_key: str
+    use_yes_price: bool = False
     yes_bids: dict[Decimal, Decimal] = field(default_factory=dict)
     no_bids: dict[Decimal, Decimal] = field(default_factory=dict)
     sequence: int | None = None
 
-    def apply_snapshot(self, message: dict[str, Any], received_ts: datetime | None = None) -> BookState:
+    def apply_snapshot(
+        self,
+        message: dict[str, Any],
+        received_ts: datetime | None = None,
+        received_monotonic_ns: int | None = None,
+    ) -> BookState:
         msg = message.get("msg", message)
         self.market_key = str(msg.get("market_ticker") or msg.get("ticker") or self.market_key)
         self.sequence = message.get("seq", self.sequence)
         self.yes_bids = {
-            level.price: level.size
+            self._normalize_price("yes", level.price): level.size
             for level in map(_level_pair, msg.get("yes_dollars_fp") or msg.get("yes_dollars") or [])
             if level.size > ZERO
         }
         self.no_bids = {
-            level.price: level.size
+            self._normalize_price("no", level.price): level.size
             for level in map(_level_pair, msg.get("no_dollars_fp") or msg.get("no_dollars") or [])
             if level.size > ZERO
         }
-        return self.state(received_ts=received_ts, sequence=self.sequence)
+        return self.state(
+            received_ts=received_ts,
+            received_monotonic_ns=received_monotonic_ns,
+            sequence=self.sequence,
+        )
 
-    def apply_delta(self, message: dict[str, Any], received_ts: datetime | None = None) -> BookState:
+    def apply_delta(
+        self,
+        message: dict[str, Any],
+        received_ts: datetime | None = None,
+        received_monotonic_ns: int | None = None,
+    ) -> BookState:
         msg = message.get("msg", message)
         self.market_key = str(msg.get("market_ticker") or msg.get("ticker") or self.market_key)
         self.sequence = message.get("seq", self.sequence)
         side = str(msg.get("side") or "").lower()
-        price = decimal(msg.get("price_dollars") or msg.get("price"))
+        price = self._normalize_price(side, decimal(msg.get("price_dollars") or msg.get("price")))
         delta = decimal(msg.get("delta_fp") or msg.get("delta") or "0")
         book = self.yes_bids if side == "yes" else self.no_bids
         new_size = book.get(price, ZERO) + delta
@@ -100,6 +116,7 @@ class KalshiOrderBook:
             book[price] = new_size
         return self.state(
             received_ts=received_ts,
+            received_monotonic_ns=received_monotonic_ns,
             venue_ts=parse_ts(msg.get("ts_ms") or msg.get("ts")),
             sequence=self.sequence,
         )
@@ -107,6 +124,7 @@ class KalshiOrderBook:
     def state(
         self,
         received_ts: datetime | None = None,
+        received_monotonic_ns: int | None = None,
         venue_ts: datetime | None = None,
         sequence: int | None = None,
     ) -> BookState:
@@ -133,13 +151,20 @@ class KalshiOrderBook:
             venue_ts=venue_ts,
             received_ts=received_ts or datetime.now(timezone.utc),
             sequence=sequence,
+            received_monotonic_ns=received_monotonic_ns or time.perf_counter_ns(),
         )
+
+    def _normalize_price(self, side: str, price: Decimal) -> Decimal:
+        if self.use_yes_price and side == "no":
+            return ONE - price
+        return price
 
 
 def polymarket_us_book_state(
     market_key: str,
     market_data: dict[str, Any],
     received_ts: datetime | None = None,
+    received_monotonic_ns: int | None = None,
 ) -> BookState:
     bids = tuple(_level_pair(item) for item in market_data.get("bids") or [])
     asks = tuple(_level_pair(item) for item in market_data.get("offers") or market_data.get("asks") or [])
@@ -165,6 +190,29 @@ def polymarket_us_book_state(
         venue_ts=parse_ts(market_data.get("transactTime")),
         received_ts=received_ts or datetime.now(timezone.utc),
         state=market_data.get("state"),
+        received_monotonic_ns=received_monotonic_ns or time.perf_counter_ns(),
+    )
+
+
+def polymarket_us_lite_book_state(
+    market_key: str,
+    market_data: dict[str, Any],
+    received_ts: datetime | None = None,
+    received_monotonic_ns: int | None = None,
+) -> BookState:
+    yes_bid = _price_value(market_data.get("bestBid") or market_data.get("best_bid"))
+    yes_ask = _price_value(market_data.get("bestAsk") or market_data.get("best_ask"))
+    return BookState(
+        venue="polymarket_us",
+        market_key=str(market_data.get("marketSlug") or market_data.get("market_slug") or market_key),
+        yes_bid=yes_bid,
+        yes_ask=yes_ask,
+        no_bid=ONE - yes_ask if yes_ask is not None else None,
+        no_ask=ONE - yes_bid if yes_bid is not None else None,
+        venue_ts=parse_ts(market_data.get("transactTime") or market_data.get("transact_time")),
+        received_ts=received_ts or datetime.now(timezone.utc),
+        state=market_data.get("state"),
+        received_monotonic_ns=received_monotonic_ns or time.perf_counter_ns(),
     )
 
 
@@ -182,3 +230,10 @@ class BookStore:
     def snapshot(self) -> dict[tuple[Venue, str], BookState]:
         return dict(self._books)
 
+
+def _price_value(raw: Any) -> Decimal | None:
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    return decimal(raw)

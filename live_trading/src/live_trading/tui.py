@@ -9,6 +9,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
+from .metrics import RecorderMetrics
 from .models import ArbOpportunity, BookState, MatchedMarket, Venue
 
 
@@ -30,9 +31,11 @@ class Dashboard:
         matches: list[MatchedMarket],
         books: dict[tuple[Venue, str], BookState],
         opportunities: list[ArbOpportunity],
+        metrics: dict | None = None,
+        recorder: RecorderMetrics | None = None,
     ) -> Group:
         return Group(
-            self._summary(matches, books, opportunities),
+            self._summary(matches, books, opportunities, metrics, recorder),
             self._opportunities(opportunities[:12]),
             self._matched_markets(matches[:25], books),
         )
@@ -45,14 +48,28 @@ class Dashboard:
         matches: list[MatchedMarket],
         books: dict[tuple[Venue, str], BookState],
         opportunities: list[ArbOpportunity],
+        metrics: dict | None,
+        recorder: RecorderMetrics | None,
     ) -> Panel:
         now = datetime.now(timezone.utc)
         fresh_books = sum(not book.is_stale(self.stale_after_seconds, now) for book in books.values())
         best_net = opportunities[0].net_edge_per_contract if opportunities else None
+        metric_text = ""
+        if metrics:
+            metric_text = (
+                f"  rate={metrics.get('updates_per_second', 0):.0f}/s"
+                f"  eval_p99={_latency(metrics, 'receipt_to_eval_ms')}"
+            )
+        if recorder:
+            metric_text += (
+                f"  recorder_q={recorder.routine_queue_depth}"
+                f"  disk={recorder.disk_usage_bytes / 1024**2:.1f}MB"
+                f"  rotations={recorder.rotation_count}"
+            )
         text = (
             f"matches={len(matches)}  books={len(books)}  fresh_books={fresh_books}  "
             f"opportunities={len(opportunities)}  best_net={fmt_edge(best_net)}  "
-            f"utc={now.isoformat(timespec='seconds')}"
+            f"utc={now.isoformat(timespec='seconds')}{metric_text}"
         )
         return Panel(text, title="Live Matched-Market Scanner", expand=True)
 
@@ -114,3 +131,7 @@ class Dashboard:
             )
         return table
 
+
+def _latency(metrics: dict, key: str) -> str:
+    value = metrics.get(key, {}).get("p99")
+    return "-" if value is None else f"{value:.2f}ms"

@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import suppress
 from dataclasses import asdict
 from decimal import Decimal
 from pprint import pprint
 
-from .arb import evaluate_all, evaluate_match
+from .arb import evaluate_match
+from .benchmark import print_benchmark_report, run_benchmarks
 from .books import BookStore
 from .config import Settings
+from .engine import HotPathEngine
 from .matching import MatchConfig, match_markets
+from .metrics import MetricsCollector, monitor_event_loop_lag
 from .models import BookState, MatchedMarket
-from .storage import SQLiteRecorder
+from .registry import PairRegistry
+from .storage import SegmentedRecorder
 from .tui import Dashboard
 from .venues.kalshi import KalshiClient
 from .venues.polymarket_us import PolymarketUSClient
@@ -28,6 +33,13 @@ def main() -> None:
     run = sub.add_parser("run", help="Run live streaming dashboard")
     run.add_argument("--categories", default="sports,politics,crypto,economics")
     run.add_argument("--max-matches", type=int, default=None)
+    run.add_argument("--metrics-out", default=None)
+
+    benchmark = sub.add_parser("benchmark", help="Benchmark event-driven scanner throughput with synthetic books")
+    benchmark.add_argument("--pairs", default="100,250,500")
+    benchmark.add_argument("--duration-seconds", type=float, default=60.0)
+    benchmark.add_argument("--profiles", default="steady,burst,stress")
+    benchmark.add_argument("--out", default="live_trading/data/benchmarks/latest.json")
 
     doctor = sub.add_parser("doctor", help="Validate configured venue APIs without placing orders")
     doctor.add_argument("--categories", default="sports")
@@ -40,6 +52,8 @@ def main() -> None:
         asyncio.run(run_discover(args))
     elif args.command == "run":
         asyncio.run(run_live(args))
+    elif args.command == "benchmark":
+        asyncio.run(run_benchmark(args))
     elif args.command == "doctor":
         asyncio.run(run_doctor(args))
     elif args.command == "sample-tui":
@@ -67,51 +81,144 @@ async def run_live(args: argparse.Namespace) -> None:
     settings = Settings.from_env()
     categories = _parse_categories(args.categories)
     store = BookStore(stale_after_seconds=settings.stale_after_seconds)
-    recorder = SQLiteRecorder(settings.sqlite_path)
+    recorder = SegmentedRecorder(
+        settings.live_data_dir,
+        quota_bytes=settings.live_data_quota_bytes,
+        low_watermark_bytes=settings.live_data_low_watermark_bytes,
+        snapshot_interval_seconds=float(settings.snapshot_interval_seconds),
+        routine_queue_maxsize=settings.routine_queue_maxsize,
+    )
     await recorder.start()
     matches = await discover_matches(settings, categories, args.max_matches or settings.max_matches)
     for match in matches:
-        await recorder.record_match(match)
+        recorder.try_record_match(match)
 
     kalshi_client = KalshiClient(settings)
     poly_client = PolymarketUSClient(settings)
     dashboard = Dashboard(stale_after_seconds=settings.stale_after_seconds)
+    metrics = MetricsCollector()
+    registry = PairRegistry.from_matches(matches)
+    engine = HotPathEngine(
+        registry,
+        store,
+        metrics,
+        trade_size=settings.trade_size,
+        slippage_buffer_per_pair=settings.slippage_buffer_per_pair,
+        kalshi_fee_mode=settings.kalshi_fee_mode,
+        polymarket_theta=settings.polymarket_taker_theta,
+        min_gross_edge=settings.min_gross_edge,
+        recorder=recorder,
+    )
 
-    async def consume_kalshi() -> None:
-        async for book in kalshi_client.stream_orderbooks([match.kalshi.stream_key for match in matches]):
-            store.set(book)
-            await recorder.record_book(book)
+    async def consume_kalshi(active_matches: list[MatchedMarket]) -> None:
+        async for book in kalshi_client.stream_orderbooks(
+            [match.kalshi.stream_key for match in active_matches],
+            on_reconnect=metrics.record_reconnect,
+        ):
+            engine.process_book(book)
 
-    async def consume_poly() -> None:
-        async for book in poly_client.stream_orderbooks([match.polymarket_us.stream_key for match in matches]):
-            store.set(book)
-            await recorder.record_book(book)
+    async def consume_poly(active_matches: list[MatchedMarket]) -> None:
+        review_slugs = [
+            match.polymarket_us.stream_key for match in active_matches if not match.is_tradeable_candidate
+        ]
+        async for book in poly_client.stream_orderbooks(
+            [match.polymarket_us.stream_key for match in active_matches],
+            lite_slugs=review_slugs,
+            on_reconnect=metrics.record_reconnect,
+        ):
+            engine.process_book(book)
+
+    async def supervise_streams() -> None:
+        signature: tuple[tuple[str, str], ...] | None = None
+        stream_tasks: list[asyncio.Task] = []
+        try:
+            while True:
+                active_matches = list(registry.matches.values())
+                next_signature = tuple(
+                    sorted((match.kalshi.stream_key, match.polymarket_us.stream_key) for match in active_matches)
+                )
+                if next_signature != signature:
+                    await _cancel_tasks(stream_tasks)
+                    stream_tasks = []
+                    if active_matches:
+                        stream_tasks = [
+                            asyncio.create_task(consume_kalshi(active_matches), name="kalshi-stream-supervisor"),
+                            asyncio.create_task(consume_poly(active_matches), name="polymarket-stream-supervisor"),
+                        ]
+                    signature = next_signature
+                    metrics.increment("subscription_topology_restarts")
+                await asyncio.sleep(1)
+        finally:
+            await _cancel_tasks(stream_tasks)
+
+    async def refresh_discovery() -> None:
+        while True:
+            await asyncio.sleep(settings.discovery_refresh_seconds)
+            try:
+                refreshed = await discover_matches(settings, categories, args.max_matches or settings.max_matches)
+            except Exception:  # noqa: BLE001
+                metrics.increment("discovery_refresh_failures")
+                continue
+            registry.replace(refreshed)
+            engine.opportunities.retain(set(registry.matches))
+            for match in refreshed:
+                recorder.try_record_match(match)
+            metrics.increment("discovery_refreshes")
 
     async def refresh_tui() -> None:
-        seen: set[tuple[str, str, str]] = set()
         with dashboard.live(refresh_per_second=float(Decimal("1") / settings.tui_refresh_seconds)) as live:
             while True:
-                opportunities = evaluate_all(
-                    matches,
-                    store.snapshot(),
-                    trade_size=settings.trade_size,
-                    slippage_buffer_per_pair=settings.slippage_buffer_per_pair,
-                    kalshi_fee_mode=settings.kalshi_fee_mode,
-                    polymarket_theta=settings.polymarket_taker_theta,
-                    min_gross_edge=settings.min_gross_edge,
+                metrics.counters["stale_books"] = sum(
+                    book.is_stale(settings.stale_after_seconds) for book in store.snapshot().values()
                 )
-                for opp in opportunities:
-                    key = (opp.match_id, opp.direction, opp.detected_ts.isoformat(timespec="seconds"))
-                    if key not in seen:
-                        seen.add(key)
-                        await recorder.record_opportunity(opp)
-                live.update(dashboard.render(matches, store.snapshot(), opportunities))
+                recorder_metrics = recorder.metrics()
+                metrics.update_recorder(recorder_metrics)
+                live.update(
+                    dashboard.render(
+                        list(registry.matches.values()),
+                        store.snapshot(),
+                        engine.opportunities.snapshot(),
+                        metrics.summary(),
+                        recorder_metrics,
+                    )
+                )
                 await asyncio.sleep(float(settings.tui_refresh_seconds))
 
+    async def write_metrics() -> None:
+        while True:
+            metrics.update_recorder(recorder.metrics())
+            payload = metrics.summary()
+            recorder.try_record_metrics(payload)
+            if args.metrics_out:
+                metrics.write_json(args.metrics_out)
+            await asyncio.sleep(float(settings.metrics_write_seconds))
+
     try:
-        await asyncio.gather(consume_kalshi(), consume_poly(), refresh_tui())
+        await asyncio.gather(
+            supervise_streams(),
+            refresh_discovery(),
+            engine.pump_signals(),
+            monitor_event_loop_lag(metrics),
+            write_metrics(),
+            refresh_tui(),
+        )
     finally:
         await recorder.close()
+
+
+async def _cancel_tasks(tasks: list[asyncio.Task]) -> None:
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+async def run_benchmark(args: argparse.Namespace) -> None:
+    pair_counts = [int(value.strip()) for value in args.pairs.split(",") if value.strip()]
+    profiles = [value.strip() for value in args.profiles.split(",") if value.strip()]
+    report = await run_benchmarks(pair_counts, args.duration_seconds, args.out, profiles=profiles)
+    print_benchmark_report(report, args.out)
 
 
 async def run_doctor(args: argparse.Namespace) -> None:

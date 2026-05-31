@@ -33,7 +33,7 @@ The live scanner has five jobs:
 1. Discover active Kalshi and Polymarket US markets.
 2. Match likely identical events across the two venues.
 3. Subscribe to matched market order books using WebSockets.
-4. Compute both arbitrage directions whenever a book changes.
+4. Compute both arbitrage directions immediately whenever a book changes.
 5. Show the best opportunities in a terminal dashboard and record observations to SQLite.
 
 The two arbitrage directions are:
@@ -86,6 +86,11 @@ live_trading/
     arb.py                   Arbitrage calculation
     fees.py                  Kalshi and Polymarket US fee estimates
     storage.py               SQLite recorder
+    registry.py              Direct venue-market-to-pair lookup
+    engine.py                Event-driven hot-path evaluation
+    shards.py                Concurrent WebSocket subscription sharding
+    metrics.py               Latency, queue, CPU, RAM, and recorder metrics
+    benchmark.py             Synthetic steady/burst/stress load testing
     tui.py                   Terminal dashboard
     auth.py                  Kalshi and Polymarket US request signing
     venues/
@@ -194,7 +199,7 @@ python -m live_trading discover --categories sports,politics --max-matches 25
 Run the live dashboard:
 
 ```powershell
-python -m live_trading run --categories sports,politics --max-matches 100
+python -m live_trading run --categories sports,politics --max-matches 500 --metrics-out live_trading/data/metrics.json
 ```
 
 The live dashboard:
@@ -205,6 +210,23 @@ The live dashboard:
 - Shows gross and net arbitrage edge.
 - Marks stale books.
 - Marks matches with warnings as review-only.
+- Shows receipt-to-evaluation latency, recorder queue depth, disk use, and snapshot rotation count.
+
+## Fast Path And Scaling
+
+The scanner is designed for up to `500` matched pairs on one local PC without creating one Python process per event.
+
+- Each venue uses long-lived WebSocket connections rather than repeated price polling.
+- Markets are split into concurrent WebSocket shards of at most `100` subscriptions.
+- Incoming messages update an in-memory `BookStore`.
+- A `PairRegistry` maps each venue market key directly to the affected matched pair.
+- Only the changed pair is recalculated. The scanner does not rescan every pair on every UI refresh.
+- Disk recording and terminal rendering happen outside the calculation path.
+- Discovery refreshes every ten minutes by default. If the matched set changes, the stream supervisors refresh their subscription topology and receive new snapshots.
+
+Warning-marked Polymarket US review candidates use lightweight market-data subscriptions. Tradable candidates request full non-debounced market data so executable depth is available.
+
+Kalshi streams explicitly request unified YES pricing through `use_yes_price: true`, then normalize the book back into YES and NO executable asks.
 
 ## Configuration
 
@@ -220,8 +242,13 @@ SLIPPAGE_BUFFER_PER_PAIR=0.01
 TRADE_SIZE=100
 KALSHI_FEE_MODE=taker
 POLYMARKET_TAKER_THETA=0.05
-LIVE_TRADING_SQLITE_PATH=live_trading/data/live_trading.sqlite3
+LIVE_TRADING_DATA_DIR=live_trading/data
+LIVE_DATA_QUOTA_BYTES=3221225472
+LIVE_DATA_LOW_WATERMARK_BYTES=2831155200
+SNAPSHOT_INTERVAL_SECONDS=30
+ROUTINE_QUEUE_MAXSIZE=20000
 TUI_REFRESH_SECONDS=0.25
+METRICS_WRITE_SECONDS=10
 ```
 
 Default fee assumptions:
@@ -234,19 +261,34 @@ The fee model is an estimate. Before live execution, fee rates and market-specif
 
 ## Data Recording
 
-The scanner records to SQLite:
+The scanner uses bounded segmented SQLite recording:
 
-- `matched_markets`: current matched pairs, confidence, warnings, and raw metadata.
-- `book_snapshots`: normalized book snapshots received from streams.
-- `opportunities`: detected arbitrage candidates and edge calculations.
+- `live_trading/data/events.sqlite3`: matched markets, every detected opportunity, and periodic metrics.
+- `live_trading/data/snapshots/YYYYMMDDTHH.sqlite3`: compact hourly normalized BBO snapshots.
+- Routine books are sampled at most once per market every `30` seconds by default.
+- Generated live data has a hard `3 GB` quota.
+- If the quota is reached, the recorder deletes oldest routine snapshot segments first until usage falls below the `2.7 GB` low-water mark.
+- Durable metrics and opportunities are trimmed only as a last resort if snapshots alone cannot satisfy the hard cap.
 
-Default database path:
+The recorder is deliberately isolated from the hot path. If its routine queue fills during a burst, sampled routine snapshots can be dropped without delaying price evaluation. Opportunity recording uses a separate durable queue.
 
-```text
-live_trading/data/live_trading.sqlite3
+## Local Benchmark
+
+Run steady, burst, and max-throughput stress profiles:
+
+```powershell
+python -m live_trading benchmark --pairs 100,250,500 --profiles steady,burst,stress --duration-seconds 60 --out live_trading/data/benchmarks/local.json
 ```
 
-This database is for later replay and strategy analysis. It is not used for order execution.
+Latest local five-second-per-profile result on the current Windows PC:
+
+| Profile | Pairs | Updates/sec | Receipt-to-eval p99 | Event-loop lag p99 | CPU | RAM | Dropped snapshots |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Steady | 500 | 1,211 | 0.099 ms | 7.207 ms | 9.9% | 48.9 MB | 0 |
+| Burst | 500 | 11,527 | 0.042 ms | 14.733 ms | 37.0% | 49.7 MB | 0 |
+| Stress | 500 | 35,225 | 0.028 ms | 1.614 ms | 96.6% | 52.2 MB | 0 |
+
+The stress profile intentionally drives CPU close to saturation to measure the ceiling. The burst profile is the more useful local headroom check.
 
 ## Matching Philosophy
 
@@ -289,12 +331,16 @@ The live tests cover:
 - The exact `0.30 + 0.50 = 0.80` arbitrage example.
 - Matching warnings.
 - Dashboard rendering without credentials.
+- Direct affected-pair lookup instead of full rescans.
+- Concurrent shard splitting and shard failure isolation.
+- Kalshi unified YES pricing.
+- Polymarket US lightweight book normalization.
+- Snapshot coalescing and quota rotation.
+- Synthetic benchmark report generation.
 
 ## Next Milestones
 
 1. Improve matching recall for sports markets by using league/team/date fields directly.
-2. Record several days of live matched books.
-3. Analyze opportunity duration, depth, and stale-feed behavior.
-4. Add paper-trading fill simulation.
-5. Only after that, design a separate execution module with strict kill switches and max unhedged exposure.
-
+2. Run a local real-data soak and analyze opportunity duration, depth, stream freshness, and reconnect behavior.
+3. Add paper-trading fill simulation.
+4. Only after that, design a separate execution module with strict kill switches and max unhedged exposure.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 from urllib.parse import urlencode, urlparse
@@ -10,9 +11,10 @@ import aiohttp
 import websockets
 
 from ..auth import polymarket_us_headers
-from ..books import parse_ts, polymarket_us_book_state
+from ..books import parse_ts, polymarket_us_book_state, polymarket_us_lite_book_state
 from ..config import Settings
 from ..models import BookState, VenueMarket
+from ..shards import merge_sharded_streams, shard_items
 
 
 def market_from_api(raw: dict[str, Any]) -> VenueMarket:
@@ -86,35 +88,73 @@ class PolymarketUSClient:
                 payload = await resp.json()
         return polymarket_us_book_state(slug, payload.get("marketData") or payload)
 
-    async def stream_orderbooks(self, slugs: list[str], batch_size: int = 100) -> AsyncIterator[BookState]:
-        if not slugs:
+    async def stream_orderbooks(
+        self,
+        slugs: list[str],
+        batch_size: int = 100,
+        *,
+        lite_slugs: list[str] | None = None,
+        on_reconnect=None,
+    ) -> AsyncIterator[BookState]:
+        lite_slugs = lite_slugs or []
+        full_slugs = [slug for slug in slugs if slug not in set(lite_slugs)]
+        subscription_shards = [
+            ("SUBSCRIPTION_TYPE_MARKET_DATA", shard)
+            for shard in shard_items(full_slugs, min(batch_size, 100))
+        ] + [
+            ("SUBSCRIPTION_TYPE_MARKET_DATA_LITE", shard)
+            for shard in shard_items(lite_slugs, min(batch_size, 100))
+        ]
+        if not subscription_shards:
             return
         headers = self._ws_headers()
-        while True:
-            try:
-                for batch in _chunks(slugs, batch_size):
-                    async for state in self._stream_batch(batch, headers):
-                        yield state
-            except Exception:
-                await asyncio.sleep(2)
 
-    async def _stream_batch(self, slugs: list[str], headers: dict[str, str]) -> AsyncIterator[BookState]:
-        request_id = "live-trading-market-data"
+        async def worker(shard: tuple[str, list[str]], shard_id: int) -> AsyncIterator[BookState]:
+            subscription_type, batch = shard
+            async for state in self._stream_batch(batch, headers, subscription_type, shard_id):
+                yield state
+
+        async for state in merge_sharded_streams(subscription_shards, worker, on_reconnect=on_reconnect):
+            yield state
+
+    async def _stream_batch(
+        self,
+        slugs: list[str],
+        headers: dict[str, str],
+        subscription_type: str = "SUBSCRIPTION_TYPE_MARKET_DATA",
+        shard_id: int = 0,
+    ) -> AsyncIterator[BookState]:
+        request_id = f"live-trading-market-data-{shard_id}"
         subscribe = {
             "subscribe": {
                 "requestId": request_id,
-                "subscriptionType": "SUBSCRIPTION_TYPE_MARKET_DATA",
+                "subscriptionType": subscription_type,
                 "marketSlugs": slugs,
+                "responsesDebounced": False,
             }
         }
         async with websockets.connect(self.settings.polymarket_ws_url, additional_headers=headers) as ws:
             await ws.send(json.dumps(subscribe))
             async for raw_message in ws:
                 received = datetime.now(timezone.utc)
+                received_monotonic_ns = time.perf_counter_ns()
                 payload = json.loads(raw_message)
                 market_data = payload.get("marketData") or payload.get("market_data")
                 if market_data:
-                    yield polymarket_us_book_state(str(market_data.get("marketSlug") or ""), market_data, received)
+                    yield polymarket_us_book_state(
+                        str(market_data.get("marketSlug") or ""),
+                        market_data,
+                        received,
+                        received_monotonic_ns,
+                    )
+                market_data_lite = payload.get("marketDataLite") or payload.get("market_data_lite")
+                if market_data_lite:
+                    yield polymarket_us_lite_book_state(
+                        str(market_data_lite.get("marketSlug") or ""),
+                        market_data_lite,
+                        received,
+                        received_monotonic_ns,
+                    )
 
     def _ws_headers(self) -> dict[str, str]:
         if not self.settings.polymarket_key_id or not self.settings.polymarket_secret_key:
@@ -130,7 +170,3 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
         return False
     wanted = {item.strip().lower() for item in categories}
     return category.lower() in wanted
-
-
-def _chunks(items: list[str], size: int) -> list[list[str]]:
-    return [items[index : index + size] for index in range(0, len(items), size)]
