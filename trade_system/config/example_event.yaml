@@ -1,0 +1,23 @@
+# Example event mapping for one multi-outcome market across Kalshi and Polymarket US.
+#
+# Replace the placeholder tickers/slugs with the actual identifiers for the event you
+# want to stream. The bot subscribes to one entry per outcome on each venue.
+#
+# How to find the identifiers:
+#   - Kalshi:    open the market page and copy the ticker (e.g. KXNBAFINALS-26-BOS).
+#                Or: GET https://api.elections.kalshi.com/trade-api/v2/markets?event_ticker=...
+#   - Polymarket US: the slug is the trailing path segment of the market URL.
+#                    Or: GET https://gateway.polymarket.us/v1/markets?active=true
+event:
+  name: "2026 NBA Finals Winner"
+  description: "Which team will win the 2026 NBA Finals"
+  outcomes:
+    - name: "Boston Celtics"
+      kalshi_ticker: "KXNBAFINALS-26-BOS"
+      polymarket_slug: "will-the-celtics-win-the-2026-nba-finals"
+    - name: "Denver Nuggets"
+      kalshi_ticker: "KXNBAFINALS-26-DEN"
+      polymarket_slug: "will-the-nuggets-win-the-2026-nba-finals"
+    - name: "Oklahoma City Thunder"
+      kalshi_ticker: "KXNBAFINALS-26-OKC"
+      polymarket_slug: "will-the-thunder-win-the-2026-nba-finals"

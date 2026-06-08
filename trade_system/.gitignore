@@ -1,0 +1,16 @@
+.env
+.env.local
+logs/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+*.egg-info/
+build/
+dist/
+
+# Real keys / API material — never commit these.
+secrets/

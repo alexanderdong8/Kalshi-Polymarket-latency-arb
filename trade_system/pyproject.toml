@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trade_system"
+version = "0.1.0"
+description = "WebSocket live data extractor for a single prediction-market event across Kalshi and Polymarket US"
+requires-python = ">=3.9"
+dependencies = [
+    "aiofiles>=23.2",
+    "aiohttp>=3.9",
+    "cryptography>=42.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "rich>=13.7",
+    "websockets>=14.0",
+]
+
+[project.scripts]
+trade-system = "trade_system.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
