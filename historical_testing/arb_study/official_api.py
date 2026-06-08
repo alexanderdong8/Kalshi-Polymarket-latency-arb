@@ -179,6 +179,11 @@ class KalshiOfficialClient:
         end_ts: int,
         period_interval: int = 1,
     ) -> list[dict[str, Any]]:
+        if end_ts < int(time.time()) - 86_400:
+            try:
+                return self.historical_market_candlesticks(market_ticker, start_ts, end_ts, period_interval)
+            except RuntimeError:
+                return self.market_candlesticks(market_ticker, start_ts, end_ts, period_interval)
         try:
             return self.market_candlesticks(market_ticker, start_ts, end_ts, period_interval)
         except RuntimeError:

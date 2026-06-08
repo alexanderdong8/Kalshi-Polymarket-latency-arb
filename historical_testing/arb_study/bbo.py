@@ -33,8 +33,12 @@ def load_polymarket_bbo(match: MatchedMarket, hour: str) -> list[BBOState]:
                 "asset_id",
                 "bids",
                 "asks",
+                "price",
+                "size",
+                "side",
                 "best_bid",
                 "best_ask",
+                "fee_rate_bps",
             ],
             filters=[
                 ("market", "=", market),
@@ -48,29 +52,57 @@ def load_polymarket_bbo(match: MatchedMarket, hour: str) -> list[BBOState]:
     df = table.to_pandas().sort_values("timestamp_received")
     yes_bid = yes_ask = no_bid = no_ask = None
     yes_bid_size = yes_ask_size = no_bid_size = no_ask_size = None
+    yes_bids: list[tuple[float, float]] = []
+    yes_asks: list[tuple[float, float]] = []
+    no_bids: list[tuple[float, float]] = []
+    no_asks: list[tuple[float, float]] = []
+    polymarket_fee_rate = None
     states: list[BBOState] = []
 
     for row in df.itertuples(index=False):
         bid = _to_float(row.best_bid)
         ask = _to_float(row.best_ask)
         bid_size = ask_size = None
+        parsed_bids = _parse_levels(row.bids)
+        parsed_asks = _parse_levels(row.asks)
+        price = _to_float(row.price)
+        size = _to_float(row.size)
+        book_side = _poly_book_side(row.side)
+        fee_rate = _fee_rate_from_bps(row.fee_rate_bps)
+        parsed_bid, bid_size = _best_bid_from_levels(parsed_bids)
+        parsed_ask, ask_size = _best_ask_from_levels(parsed_asks)
 
         if bid is None or ask is None:
-            parsed_bid, bid_size = _best_bid_from_levels(row.bids)
-            parsed_ask, ask_size = _best_ask_from_levels(row.asks)
             bid = bid if bid is not None else parsed_bid
             ask = ask if ask is not None else parsed_ask
 
         if row.asset_id == yes_id:
+            yes_bids = parsed_bids or yes_bids
+            yes_asks = parsed_asks or yes_asks
+            if book_side == "bids":
+                yes_bids = _apply_level_update(yes_bids, price, size)
+            elif book_side == "asks":
+                yes_asks = _apply_level_update(yes_asks, price, size)
+            yes_bid, yes_bid_size = _prefer_ladder_best(yes_bids, bid, bid_size, is_bid=True)
+            yes_ask, yes_ask_size = _prefer_ladder_best(yes_asks, ask, ask_size, is_bid=False)
             yes_bid = bid if bid is not None else yes_bid
             yes_ask = ask if ask is not None else yes_ask
             yes_bid_size = bid_size if bid_size is not None else yes_bid_size
             yes_ask_size = ask_size if ask_size is not None else yes_ask_size
         elif row.asset_id == no_id:
+            no_bids = parsed_bids or no_bids
+            no_asks = parsed_asks or no_asks
+            if book_side == "bids":
+                no_bids = _apply_level_update(no_bids, price, size)
+            elif book_side == "asks":
+                no_asks = _apply_level_update(no_asks, price, size)
+            no_bid, no_bid_size = _prefer_ladder_best(no_bids, bid, bid_size, is_bid=True)
+            no_ask, no_ask_size = _prefer_ladder_best(no_asks, ask, ask_size, is_bid=False)
             no_bid = bid if bid is not None else no_bid
             no_ask = ask if ask is not None else no_ask
             no_bid_size = bid_size if bid_size is not None else no_bid_size
             no_ask_size = ask_size if ask_size is not None else no_ask_size
+        polymarket_fee_rate = fee_rate if fee_rate is not None else polymarket_fee_rate
 
         if None not in (yes_bid, yes_ask, no_bid, no_ask):
             states.append(
@@ -84,6 +116,11 @@ def load_polymarket_bbo(match: MatchedMarket, hour: str) -> list[BBOState]:
                     yes_ask_size=yes_ask_size,
                     no_bid_size=no_bid_size,
                     no_ask_size=no_ask_size,
+                    yes_bids=tuple(yes_bids),
+                    yes_asks=tuple(yes_asks),
+                    no_bids=tuple(no_bids),
+                    no_asks=tuple(no_asks),
+                    polymarket_fee_rate=polymarket_fee_rate,
                 )
             )
     return states
@@ -159,6 +196,10 @@ def load_kalshi_bbo(match: MatchedMarket, hour: str) -> list[BBOState]:
                 yes_ask_size=no_bid_size,
                 no_bid_size=no_bid_size,
                 no_ask_size=yes_bid_size,
+                yes_bids=tuple(sorted(yes_book.items(), reverse=True)),
+                yes_asks=_asks_from_opposite_bids(no_book),
+                no_bids=tuple(sorted(no_book.items(), reverse=True)),
+                no_asks=_asks_from_opposite_bids(yes_book),
             )
         )
     return states
@@ -234,11 +275,54 @@ def _parse_levels(value: Any) -> list[tuple[float, float]]:
 
 
 def _best_bid_from_levels(value: Any) -> tuple[float | None, float | None]:
-    levels = _parse_levels(value)
+    levels = value if isinstance(value, list) else _parse_levels(value)
     return max(levels, key=lambda item: item[0]) if levels else (None, None)
 
 
 def _best_ask_from_levels(value: Any) -> tuple[float | None, float | None]:
-    levels = _parse_levels(value)
+    levels = value if isinstance(value, list) else _parse_levels(value)
     return min(levels, key=lambda item: item[0]) if levels else (None, None)
 
+
+def _asks_from_opposite_bids(book: dict[float, float]) -> tuple[tuple[float, float], ...]:
+    return tuple(sorted(((1.0 - price, size) for price, size in book.items() if size > 0), key=lambda item: item[0]))
+
+
+def _poly_book_side(value: Any) -> str | None:
+    side = str(value or "").lower()
+    if side in {"buy", "bid", "bids"}:
+        return "bids"
+    if side in {"sell", "ask", "asks"}:
+        return "asks"
+    return None
+
+
+def _apply_level_update(
+    levels: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    price: float | None,
+    size: float | None,
+) -> list[tuple[float, float]]:
+    if price is None or size is None:
+        return list(levels)
+    book = dict(levels)
+    if size <= 1e-9:
+        book.pop(price, None)
+    else:
+        book[price] = size
+    return list(book.items())
+
+
+def _prefer_ladder_best(
+    levels: list[tuple[float, float]] | tuple[tuple[float, float], ...],
+    fallback_price: float | None,
+    fallback_size: float | None,
+    *,
+    is_bid: bool,
+) -> tuple[float | None, float | None]:
+    best = _best_bid_from_levels(list(levels)) if is_bid else _best_ask_from_levels(list(levels))
+    return best if best[0] is not None else (fallback_price, fallback_size)
+
+
+def _fee_rate_from_bps(value: Any) -> float | None:
+    bps = _to_float(value)
+    return None if bps is None else bps / 10_000

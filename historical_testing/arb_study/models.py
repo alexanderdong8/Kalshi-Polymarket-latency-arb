@@ -59,6 +59,11 @@ class BBOState:
     yes_ask_size: float | None = None
     no_bid_size: float | None = None
     no_ask_size: float | None = None
+    yes_bids: tuple[tuple[float, float], ...] = ()
+    yes_asks: tuple[tuple[float, float], ...] = ()
+    no_bids: tuple[tuple[float, float], ...] = ()
+    no_asks: tuple[tuple[float, float], ...] = ()
+    polymarket_fee_rate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -77,4 +82,3 @@ class Opportunity:
     trade_size: int
     estimated_partial_fill_exposure: float
     depth_limited_contracts: float | None
-

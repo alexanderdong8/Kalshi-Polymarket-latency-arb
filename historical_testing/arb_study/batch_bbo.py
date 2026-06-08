@@ -10,6 +10,12 @@ from .bbo import (
     _best_bid_from_levels,
     _best_book_bid,
     _iter_struct_levels,
+    _parse_levels,
+    _asks_from_opposite_bids,
+    _apply_level_update,
+    _fee_rate_from_bps,
+    _poly_book_side,
+    _prefer_ladder_best,
     _timestamp,
     _to_float,
 )
@@ -42,8 +48,12 @@ def load_polymarket_bbo_batch(
                 "asset_id",
                 "bids",
                 "asks",
+                "price",
+                "size",
+                "side",
                 "best_bid",
                 "best_ask",
+                "fee_rate_bps",
             ],
             filters=[("market", "in", list(contract_to_matches.keys()))],
         )
@@ -52,7 +62,7 @@ def load_polymarket_bbo_batch(
         return {}
 
     df = table.to_pandas().sort_values("timestamp_received")
-    state_by_match: dict[str, dict[str, float | None]] = {}
+    state_by_match: dict[str, dict[str, object]] = {}
     out: dict[str, list[BBOState]] = defaultdict(list)
 
     for row in df.itertuples(index=False):
@@ -62,10 +72,16 @@ def load_polymarket_bbo_batch(
         bid = _to_float(row.best_bid)
         ask = _to_float(row.best_ask)
         bid_size = ask_size = None
+        parsed_bids = _parse_levels(row.bids)
+        parsed_asks = _parse_levels(row.asks)
+        price = _to_float(row.price)
+        size = _to_float(row.size)
+        book_side = _poly_book_side(row.side)
+        fee_rate = _fee_rate_from_bps(row.fee_rate_bps)
+        parsed_bid, bid_size = _best_bid_from_levels(parsed_bids)
+        parsed_ask, ask_size = _best_ask_from_levels(parsed_asks)
 
         if bid is None or ask is None:
-            parsed_bid, bid_size = _best_bid_from_levels(row.bids)
-            parsed_ask, ask_size = _best_ask_from_levels(row.asks)
             bid = bid if bid is not None else parsed_bid
             ask = ask if ask is not None else parsed_ask
 
@@ -89,12 +105,34 @@ def load_polymarket_bbo_batch(
                     "yes_ask_size": None,
                     "no_bid_size": None,
                     "no_ask_size": None,
+                    "yes_bids": (),
+                    "yes_asks": (),
+                    "no_bids": (),
+                    "no_asks": (),
+                    "polymarket_fee_rate": None,
                 },
             )
+            state[f"{side}_bids"] = tuple(parsed_bids) if parsed_bids else state[f"{side}_bids"]
+            state[f"{side}_asks"] = tuple(parsed_asks) if parsed_asks else state[f"{side}_asks"]
+            if book_side == "bids":
+                state[f"{side}_bids"] = tuple(_apply_level_update(state[f"{side}_bids"], price, size))
+            elif book_side == "asks":
+                state[f"{side}_asks"] = tuple(_apply_level_update(state[f"{side}_asks"], price, size))
+            ladder_bid, ladder_bid_size = _prefer_ladder_best(
+                state[f"{side}_bids"], bid, bid_size, is_bid=True
+            )
+            ladder_ask, ladder_ask_size = _prefer_ladder_best(
+                state[f"{side}_asks"], ask, ask_size, is_bid=False
+            )
+            bid = ladder_bid
+            ask = ladder_ask
+            bid_size = ladder_bid_size
+            ask_size = ladder_ask_size
             state[f"{side}_bid"] = bid if bid is not None else state[f"{side}_bid"]
             state[f"{side}_ask"] = ask if ask is not None else state[f"{side}_ask"]
             state[f"{side}_bid_size"] = bid_size if bid_size is not None else state[f"{side}_bid_size"]
             state[f"{side}_ask_size"] = ask_size if ask_size is not None else state[f"{side}_ask_size"]
+            state["polymarket_fee_rate"] = fee_rate if fee_rate is not None else state["polymarket_fee_rate"]
 
             if None not in (state["yes_bid"], state["yes_ask"], state["no_bid"], state["no_ask"]):
                 out[match.match_id].append(
@@ -108,6 +146,11 @@ def load_polymarket_bbo_batch(
                         yes_ask_size=state["yes_ask_size"],
                         no_bid_size=state["no_bid_size"],
                         no_ask_size=state["no_ask_size"],
+                        yes_bids=state["yes_bids"],
+                        yes_asks=state["yes_asks"],
+                        no_bids=state["no_bids"],
+                        no_asks=state["no_asks"],
+                        polymarket_fee_rate=state["polymarket_fee_rate"],
                     )
                 )
     return dict(out)
@@ -193,6 +236,10 @@ def load_kalshi_bbo_batch(
             yes_ask_size=no_bid_size,
             no_bid_size=no_bid_size,
             no_ask_size=yes_bid_size,
+            yes_bids=tuple(sorted(yes_books[ticker].items(), reverse=True)),
+            yes_asks=_asks_from_opposite_bids(no_books[ticker]),
+            no_bids=tuple(sorted(no_books[ticker].items(), reverse=True)),
+            no_asks=_asks_from_opposite_bids(yes_books[ticker]),
         )
         for match in ticker_to_matches[ticker]:
             out[match.match_id].append(state)

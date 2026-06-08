@@ -13,10 +13,16 @@ from typing import Any
 from .models import MatchedMarket, MarketRef, OutcomeRef
 from .official_api import KalshiOfficialClient, PolymarketGammaClient
 from .scenario import classify_domain
-from .serde import read_json, write_json
+from .serde import matched_market_from_dict, read_json, write_json
+from .strict_matching import (
+    strict_equivalence_rejection,
+    strict_match_rejection,
+    strict_outcome_label_rejection,
+)
 
 
 CACHE_VERSION = 2
+MATCHING_GATE_VERSION = 4
 STOP_WORDS = {
     "a",
     "an",
@@ -184,9 +190,13 @@ def match_official_catalogs(
     kalshi_markets: list[dict[str, Any]],
     polymarket_markets: list[dict[str, Any]],
     min_score: float = 0.78,
+    *,
+    poly_records: list[dict[str, Any]] | None = None,
+    progress_label: str | None = None,
 ) -> tuple[list[MatchedMarket], list[dict[str, Any]]]:
-    poly_records = [_poly_record(item) for item in polymarket_markets]
-    poly_records = [item for item in poly_records if item]
+    if poly_records is None:
+        poly_records = [_poly_record(item) for item in polymarket_markets]
+        poly_records = [item for item in poly_records if item]
     index: dict[str, set[int]] = defaultdict(set)
     for pos, item in enumerate(poly_records):
         for token in item["tokens"]:
@@ -194,15 +204,25 @@ def match_official_catalogs(
 
     matches: list[MatchedMarket] = []
     rejected: list[dict[str, Any]] = []
-    for kalshi in kalshi_markets:
+    for index_position, kalshi in enumerate(kalshi_markets, start=1):
+        if progress_label and index_position % 10_000 == 0:
+            print(
+                f"Strict matching {progress_label}: {index_position}/{len(kalshi_markets)} "
+                f"Kalshi rows checked; pairs={len(matches)} rejected={len(rejected)}",
+                flush=True,
+            )
         kalshi_record = _kalshi_record(kalshi)
         if not kalshi_record:
             continue
-        candidate_positions = _candidate_positions(kalshi_record["tokens"], index)
+        candidate_positions = _candidate_positions(
+            kalshi_record["tokens"],
+            index,
+            require_two_shared_tokens=True,
+        )
         scored = []
         for pos in candidate_positions:
             poly_record = poly_records[pos]
-            scored_item = _score_pair(kalshi_record, poly_record)
+            scored_item = _score_pair(kalshi_record, poly_record, min_score=min_score)
             if scored_item:
                 scored.append(scored_item)
         scored.sort(key=lambda item: item["score"], reverse=True)
@@ -230,6 +250,7 @@ def match_official_catalogs_monthly(
     kalshi_markets: list[dict[str, Any]],
     polymarket_markets: list[dict[str, Any]],
     min_score: float = 0.78,
+    checkpoint_dir: str | Path | None = None,
 ) -> tuple[list[MatchedMarket], list[dict[str, Any]]]:
     kalshi_by_month: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for market in kalshi_markets:
@@ -239,27 +260,56 @@ def match_official_catalogs_monthly(
 
     matches = []
     rejected = []
+    poly_records = [_poly_record(item) for item in polymarket_markets]
+    poly_records = [item for item in poly_records if item]
+    checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else None
+    if checkpoint_root:
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
     for month, monthly_kalshi in sorted(kalshi_by_month.items()):
         pivot = _parse_iso(f"{month}-15T00:00:00Z")
-        nearby_poly = [
-            market
-            for market in polymarket_markets
-            if _within_days(
-                _parse_optional(market.get("endDate") or market.get("closedTime")),
-                pivot,
-                76,
-            )
+        nearby_poly_records = [
+            record for record in poly_records if _within_days(record["date"], pivot, 76)
         ]
-        monthly_matches, monthly_rejected = match_official_catalogs(
-            monthly_kalshi,
-            nearby_poly,
-            min_score=min_score,
-        )
+        checkpoint = checkpoint_root / f"{month}.json" if checkpoint_root else None
+        checkpoint_payload = read_json(checkpoint) if checkpoint and checkpoint.exists() else None
+        if (
+            checkpoint_payload
+            and checkpoint_payload.get("kalshi_markets") == len(monthly_kalshi)
+            and checkpoint_payload.get("nearby_polymarket") == len(nearby_poly_records)
+            and checkpoint_payload.get("min_score") == min_score
+            and checkpoint_payload.get("matching_gate_version") == MATCHING_GATE_VERSION
+        ):
+            monthly_matches = [
+                matched_market_from_dict(item) for item in checkpoint_payload.get("matches", [])
+            ]
+            monthly_rejected = list(checkpoint_payload.get("rejected", []))
+        else:
+            monthly_matches, monthly_rejected = match_official_catalogs(
+                monthly_kalshi,
+                [],
+                min_score=min_score,
+                poly_records=nearby_poly_records,
+                progress_label=month,
+            )
+            if checkpoint:
+                write_json(
+                    checkpoint,
+                    {
+                        "month": month,
+                        "kalshi_markets": len(monthly_kalshi),
+                        "nearby_polymarket": len(nearby_poly_records),
+                        "min_score": min_score,
+                        "matching_gate_version": MATCHING_GATE_VERSION,
+                        "matches": [asdict(match) for match in monthly_matches],
+                        "rejected": monthly_rejected,
+                    },
+                )
         matches.extend(monthly_matches)
         rejected.extend(monthly_rejected)
         print(
             f"Matched official catalog month {month}: "
-            f"kalshi={len(monthly_kalshi)} nearby_polymarket={len(nearby_poly)} pairs={len(monthly_matches)}"
+            f"kalshi={len(monthly_kalshi)} nearby_polymarket={len(nearby_poly_records)} pairs={len(monthly_matches)}",
+            flush=True,
         )
     deduped = {match.match_id: match for match in matches}
     return sorted(deduped.values(), key=lambda item: (item.kalshi.resolution_date or "", item.match_id)), rejected
@@ -353,9 +403,16 @@ def _kalshi_record(raw: dict[str, Any]) -> dict[str, Any] | None:
     if raw.get("market_type") not in {None, "binary"}:
         return None
     title = " ".join(filter(None, [raw.get("title"), raw.get("yes_sub_title")]))
+    semantic_text = " ".join(
+        filter(None, [title, raw.get("rules_primary"), raw.get("rules_secondary")])
+    )
     return {
         "raw": raw,
         "title": title,
+        "question_title": str(raw.get("title") or ""),
+        "title_norm": _norm(title),
+        "semantic_text": semantic_text,
+        "semantic_norm": _norm(semantic_text),
         "tokens": _tokens(title),
         "domain": classify_domain(title),
         "date": _parse_optional(raw.get("close_time") or raw.get("expiration_time")),
@@ -369,9 +426,14 @@ def _poly_record(raw: dict[str, Any]) -> dict[str, Any] | None:
     if len(outcomes) != 2 or len(token_ids) != 2:
         return None
     title = " ".join(filter(None, [raw.get("question"), raw.get("groupItemTitle")]))
+    semantic_text = " ".join(filter(None, [title, raw.get("description")]))
     return {
         "raw": raw,
         "title": title,
+        "question_title": str(raw.get("question") or ""),
+        "title_norm": _norm(title),
+        "semantic_text": semantic_text,
+        "semantic_norm": _norm(semantic_text),
         "tokens": _tokens(title),
         "domain": classify_domain(title),
         "date": _parse_optional(raw.get("endDate") or raw.get("closedTime")),
@@ -380,14 +442,15 @@ def _poly_record(raw: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _score_pair(kalshi: dict[str, Any], poly: dict[str, Any]) -> dict[str, Any] | None:
+def _score_pair(
+    kalshi: dict[str, Any],
+    poly: dict[str, Any],
+    *,
+    min_score: float = 0.0,
+) -> dict[str, Any] | None:
     if not kalshi["tokens"] or not poly["tokens"]:
         return None
     if _is_sports(kalshi["domain"]) != _is_sports(poly["domain"]):
-        return None
-    if not _semantic_compatible(kalshi["title"], poly["title"]):
-        return None
-    if not _structured_compatible(kalshi["title"], poly["title"]):
         return None
     shared = kalshi["tokens"] & poly["tokens"]
     if len(shared) < 2:
@@ -397,11 +460,24 @@ def _score_pair(kalshi: dict[str, Any], poly: dict[str, Any]) -> dict[str, Any] 
         return None
     union = kalshi["tokens"] | poly["tokens"]
     jaccard = len(shared) / len(union)
-    sequence = SequenceMatcher(None, _norm(kalshi["title"]), _norm(poly["title"])).ratio()
     oriented = _orient_poly_outcomes(poly, kalshi["yes_label"])
     if not oriented:
         return None
     label_bonus = oriented["label_score"]
+    if (0.50 + (0.35 * jaccard) + (0.15 * label_bonus)) < min_score:
+        return None
+    sequence_matcher = SequenceMatcher(None, kalshi["title_norm"], poly["title_norm"])
+    if ((0.50 * sequence_matcher.quick_ratio()) + (0.35 * jaccard) + (0.15 * label_bonus)) < min_score:
+        return None
+    if not _semantic_compatible_norm(kalshi["semantic_norm"], poly["semantic_norm"]):
+        return None
+    if strict_match_rejection(kalshi["question_title"], poly["question_title"]):
+        return None
+    if strict_outcome_label_rejection(poly["question_title"], kalshi["yes_label"]):
+        return None
+    if not _structured_compatible(kalshi["semantic_text"], poly["semantic_text"]):
+        return None
+    sequence = sequence_matcher.ratio()
     score = (0.50 * sequence) + (0.35 * jaccard) + (0.15 * label_bonus)
     return {
         "score": score,
@@ -515,10 +591,13 @@ def _trim_kalshi_market(raw: dict[str, Any]) -> dict[str, Any]:
         "close_time",
         "expiration_time",
         "expected_expiration_time",
+        "open_time",
         "market_type",
         "status",
         "result",
         "volume_fp",
+        "rules_primary",
+        "rules_secondary",
     ]
     return {key: raw.get(key) for key in keys}
 
@@ -545,6 +624,11 @@ def _trim_poly_market(raw: dict[str, Any]) -> dict[str, Any]:
         "groupItemTitle",
         "endDate",
         "closedTime",
+        "startDate",
+        "gameStartTime",
+        "description",
+        "resolutionSource",
+        "tags",
         "outcomes",
         "clobTokenIds",
         "enableOrderBook",
@@ -596,7 +680,12 @@ def _tokens(value: str) -> set[str]:
     }
 
 
-def _candidate_positions(tokens: set[str], index: dict[str, set[int]]) -> set[int]:
+def _candidate_positions(
+    tokens: set[str],
+    index: dict[str, set[int]],
+    *,
+    require_two_shared_tokens: bool = False,
+) -> set[int]:
     buckets = sorted(
         (index[token] for token in tokens if token in index),
         key=len,
@@ -607,12 +696,18 @@ def _candidate_positions(tokens: set[str], index: dict[str, set[int]]) -> set[in
     for bucket in chosen:
         counts.update(bucket)
     overlapping = {pos for pos, count in counts.items() if count >= 2}
+    if require_two_shared_tokens:
+        return overlapping
     return overlapping or (set(chosen[0]) if chosen else set())
 
 
 def _semantic_compatible(left: str, right: str) -> bool:
     left_norm = _norm(left)
     right_norm = _norm(right)
+    return _semantic_compatible_norm(left_norm, right_norm)
+
+
+def _semantic_compatible_norm(left_norm: str, right_norm: str) -> bool:
     for group in SEMANTIC_GROUPS:
         left_markers = _markers(left_norm, group)
         right_markers = _markers(right_norm, group)
@@ -637,7 +732,7 @@ def _structured_compatible(left: str, right: str) -> bool:
     right_nominee = _nominee_last_name(right_norm)
     if left_nominee and right_nominee and left_nominee != right_nominee:
         return False
-    return True
+    return strict_equivalence_rejection(left, right) is None
 
 
 def _nominee_last_name(value: str) -> str | None:
@@ -673,7 +768,12 @@ def _month_slices(start: datetime, end: datetime):
 
 
 def _parse_iso(value: str) -> datetime:
-    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    normalized = value.replace("Z", "+00:00")
+    fractional = re.match(r"^(.*?\.)(\d+)([+-]\d{2}:\d{2})?$", normalized)
+    if fractional:
+        prefix, digits, offset = fractional.groups()
+        normalized = f"{prefix}{digits[:6].ljust(6, '0')}{offset or ''}"
+    dt = datetime.fromisoformat(normalized)
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 

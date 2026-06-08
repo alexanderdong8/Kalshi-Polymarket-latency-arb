@@ -22,12 +22,14 @@ class OfficialProxyOpportunity:
     total_cost: float
     gross_edge_per_contract: float
     net_edge_per_contract: float
+    roi_on_entry_cost: float
     total_fee: float
     domain: str
     phase: str
     polymarket_title: str
     kalshi_title: str
     warning: str | None
+    pair_slippage_assumption: float | None = None
 
 
 def scan_official_price_histories(
@@ -180,6 +182,7 @@ def _evaluate_proxy_state(
     slippage_buffer: float,
     kalshi_fee_mode: str,
     polymarket_fallback_fee_rate: float,
+    pair_slippage_assumption: float | None = None,
 ) -> list[OfficialProxyOpportunity]:
     directions = [
         ("kalshi_yes__poly_no_proxy", "kalshi", "polymarket", state["kalshi_yes_ask"], state["poly_no_price"]),
@@ -203,7 +206,13 @@ def _evaluate_proxy_state(
             kalshi_mode=kalshi_fee_mode,
             polymarket_fallback_rate=polymarket_fallback_fee_rate,
         )
-        net = gross - (fees / trade_size) - (2 * slippage_buffer)
+        effective_pair_slippage = (
+            pair_slippage_assumption
+            if pair_slippage_assumption is not None
+            else (2 * slippage_buffer)
+        )
+        net = gross - (fees / trade_size) - effective_pair_slippage
+        capital_paid = yes_price + no_price + (fees / trade_size) + effective_pair_slippage
         out.append(
             OfficialProxyOpportunity(
                 match_id=match.match_id,
@@ -216,12 +225,14 @@ def _evaluate_proxy_state(
                 total_cost=yes_price + no_price,
                 gross_edge_per_contract=gross,
                 net_edge_per_contract=net,
+                roi_on_entry_cost=net / capital_paid if capital_paid else 0.0,
                 total_fee=fees,
                 domain=domain,
                 phase=phase,
                 polymarket_title=match.polymarket.title,
                 kalshi_title=match.kalshi.title,
                 warning=match.resolution_date_warning,
+                pair_slippage_assumption=pair_slippage_assumption,
             )
         )
     return out

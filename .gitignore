@@ -2,6 +2,10 @@
 historical_testing/reports/
 historical_testing/data/official_history_*
 historical_testing/data/monthly_12m_*
+historical_testing/data/annual_official_*
+historical_testing/data/annual_match_checkpoints/
+historical_testing/data/pmxt_archive_inventory.json
+historical_testing/data/polymarket_us_public_catalog.json
 live_trading/data/
 
 # Python / virtualenv

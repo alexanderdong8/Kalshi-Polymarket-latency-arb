@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Iterator
+import time
+from typing import Any, Iterator
 
 import fsspec
 import requests
@@ -48,11 +50,18 @@ def remote_exists(url: str, timeout: int = 15) -> bool:
         return False
 
 
+def require_raw_historical_object(url: str) -> str:
+    allowed_prefixes = ("https://r2v2.pmxt.dev/", "https://r2kalshi.pmxt.dev/")
+    if not url.startswith(allowed_prefixes) or not url.endswith(".parquet"):
+        raise ValueError("Historical PMXT replay accepts only raw verified Parquet archive objects.")
+    return url
+
+
 def https_filesystem():
     return fsspec.filesystem("https")
 
 
-def available_archive_hours(venue: str) -> list[str]:
+def available_archive_hours(venue: str, max_pages: int = 100) -> list[str]:
     if venue == "polymarket":
         page = "https://archive.pmxt.dev/Polymarket/v2"
         pattern = r"polymarket_orderbook_(\d{4}-\d{2}-\d{2}T\d{2})\.parquet"
@@ -62,9 +71,29 @@ def available_archive_hours(venue: str) -> list[str]:
     else:
         raise ValueError(f"Unsupported archive venue: {venue}")
 
-    resp = requests.get(page, timeout=30)
-    resp.raise_for_status()
-    return sorted(set(re.findall(pattern, resp.text)))
+    found: set[str] = set()
+    empty_pages = 0
+    advertised_pages = max_pages
+    for page_number in range(1, max_pages + 1):
+        resp = _get_archive_page(page, page_number)
+        resp.raise_for_status()
+        page_count = re.search(r"Page\s+\d+\s+of\s+(\d+)", resp.text, flags=re.IGNORECASE)
+        if page_count:
+            advertised_pages = min(max_pages, int(page_count.group(1)))
+        hours = set(re.findall(pattern, resp.text))
+        if not hours:
+            empty_pages += 1
+            if empty_pages >= 2:
+                break
+            continue
+        empty_pages = 0
+        before = len(found)
+        found.update(hours)
+        if len(found) == before and page_number > 1:
+            break
+        if page_number >= advertised_pages:
+            break
+    return sorted(found)
 
 
 def overlapping_archive_hours() -> list[str]:
@@ -83,3 +112,71 @@ def overlapping_archive_hours() -> list[str]:
         if remote_exists(parquet_url("kalshi", hour), timeout=10)
     ]
     return probed
+
+
+def archive_inventory(verify_objects: bool = True) -> dict[str, Any]:
+    """Return the public PMXT v2 overlap and validate every claimed shared object."""
+    listing_errors = []
+    try:
+        poly = available_archive_hours("polymarket")
+    except requests.RequestException as exc:
+        poly = []
+        listing_errors.append({"venue": "polymarket", "error": str(exc)})
+    try:
+        kalshi = available_archive_hours("kalshi")
+    except requests.RequestException as exc:
+        kalshi = []
+        listing_errors.append({"venue": "kalshi", "error": str(exc)})
+    overlap = sorted(set(poly) & set(kalshi))
+    if verify_objects:
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            verified = [
+                hour
+                for hour, exists in zip(overlap, executor.map(_raw_hour_exists, overlap))
+                if exists
+            ]
+    else:
+        verified = overlap
+    return {
+        "source": "public_pmxt_archive_parquet_inventory",
+        "polymarket_v2_hours": len(poly),
+        "polymarket_v2_first": poly[0] if poly else None,
+        "polymarket_v2_last": poly[-1] if poly else None,
+        "kalshi_hours": len(kalshi),
+        "kalshi_first": kalshi[0] if kalshi else None,
+        "kalshi_last": kalshi[-1] if kalshi else None,
+        "overlap_hours": len(overlap),
+        "verified_overlap_hours": len(verified),
+        "overlap_first": verified[0] if verified else None,
+        "overlap_last": verified[-1] if verified else None,
+        "hours": verified,
+        "listing_complete": not listing_errors,
+        "listing_errors": listing_errors,
+        "historical_guardrail": (
+            "Only raw Parquet objects verified in both venue archives count as historical L2. "
+            "Do not treat a hosted current-book fallback as historical data."
+        ),
+    }
+
+
+def _raw_hour_exists(hour: str) -> bool:
+    return remote_exists(
+        require_raw_historical_object(parquet_url("polymarket", hour)),
+        timeout=10,
+    ) and remote_exists(
+        require_raw_historical_object(parquet_url("kalshi", hour)),
+        timeout=10,
+    )
+
+
+def _get_archive_page(url: str, page_number: int, retries: int = 4):
+    last_error: requests.RequestException | None = None
+    for attempt in range(retries):
+        try:
+            return requests.get(url, params={"page": page_number}, timeout=30)
+        except requests.RequestException as exc:
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(0.75 * (attempt + 1))
+    assert last_error is not None
+    raise last_error

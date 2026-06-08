@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import mean, median
 from typing import Any
 
@@ -27,6 +27,9 @@ POPULAR_SPORTS = {
 
 SPORTS_WORDS = POPULAR_SPORTS | {
     "golf",
+    "pga",
+    "pga tour",
+    "masters",
     "cricket",
     "rugby",
     "chess",
@@ -35,6 +38,16 @@ SPORTS_WORDS = POPULAR_SPORTS | {
     "mma",
     "boxing",
     "wnba",
+    "atp",
+    "wta",
+    "itf",
+    "ipl",
+    "esports",
+    "e sports",
+    "league of legends",
+    "valorant",
+    "counter strike",
+    "cs2",
 }
 
 POLITICS_WORDS = {
@@ -66,6 +79,26 @@ ECON_WORDS = {
     "crypto",
 }
 
+CULTURE_WORDS = {
+    "culture",
+    "oscars",
+    "grammy",
+    "grammys",
+    "movie",
+    "album",
+    "film independent",
+    "spirit awards",
+    "emmy",
+    "golden globe",
+    "bafta",
+    "music",
+    "tv",
+    "met gala",
+    "eurovision",
+    "streamer awards",
+    "streamer of the year",
+}
+
 SPORT_SUBCATEGORY_WORDS = [
     ("sports_basketball", {"basketball", "nba", "wnba", "ncaa", "euroleague"}),
     ("sports_tennis", {"tennis", "atp", "wta", "wimbledon", "roland garros", "us open"}),
@@ -80,41 +113,150 @@ SPORT_SUBCATEGORY_WORDS = [
     ("sports_chess", {"chess"}),
 ]
 
+FOCUS_SCENARIO_WORDS = [
+    ("wnba", {"wnba"}),
+    ("nba", {"nba"}),
+    ("mlb", {"mlb", "major league baseball"}),
+    ("itf_men", {"itf men", "itfm"}),
+    ("itf_women", {"itf women", "itfw"}),
+    ("atp", {"atp"}),
+    ("wta", {"wta"}),
+    ("golf", {"golf", "pga", "masters"}),
+    ("ipl", {"ipl", "indian premier league"}),
+    ("nhl", {"nhl", "stanley cup"}),
+    ("ufc", {"ufc", "mma"}),
+    ("fifa_world_cup", {"fifa world cup", "men s world cup"}),
+    ("mls", {"mls", "major league soccer"}),
+    ("f1", {"formula 1", "formula one", "f1", "grand prix"}),
+    ("esports", {"esports", "e sports", "league of legends", "valorant", "counter strike", "cs2", "dota", "call of duty"}),
+]
+
 
 def classify_domain(title: str, category: str | None = None, tags: list[str] | None = None) -> str:
     haystack = _norm(" ".join([title, category or "", " ".join(tags or [])]))
-    if any(word in haystack for word in SPORTS_WORDS):
-        if any(word in haystack for word in POPULAR_SPORTS):
+    if _contains_any(haystack, CULTURE_WORDS):
+        return "entertainment"
+    if _contains_any(haystack, SPORTS_WORDS):
+        if _contains_any(haystack, POPULAR_SPORTS):
             return "sports_popular"
         return "sports_other"
-    if any(word in haystack for word in POLITICS_WORDS):
+    if _contains_any(haystack, POLITICS_WORDS):
         return "politics"
-    if any(word in haystack for word in ECON_WORDS):
+    if _contains_any(haystack, ECON_WORDS):
         return "economics_crypto"
-    if any(word in haystack for word in ["movie", "album", "oscars", "avengers", "tv", "music"]):
-        return "entertainment"
     return "other"
 
 
 def classify_scenario(title: str, category: str | None = None, tags: list[str] | None = None) -> str:
     haystack = _norm(" ".join([title, category or "", " ".join(tags or [])]))
-    for label, words in SPORT_SUBCATEGORY_WORDS:
-        if any(word in haystack for word in words):
-            return label
     domain = classify_domain(title, category, tags)
     if domain.startswith("sports_"):
+        for label, words in SPORT_SUBCATEGORY_WORDS:
+            if _contains_any(haystack, words):
+                return label
         return "sports_other"
     if domain == "politics":
-        if any(word in haystack for word in ["election", "primary", "nominee", "president", "senate", "governor", "mayor"]):
+        if _contains_any(haystack, ["election", "primary", "nominee", "president", "senate", "governor", "mayor"]):
             return "politics_elections"
         return "politics_other"
     if domain == "economics_crypto":
-        if any(word in haystack for word in ["bitcoin", "crypto", "ethereum", "solana", "doge"]):
+        if _contains_any(haystack, ["bitcoin", "crypto", "ethereum", "solana", "doge"]):
             return "crypto"
-        if any(word in haystack for word in ["fed", "rate", "cpi", "inflation", "gdp", "unemployment", "jobs"]):
+        if _contains_any(haystack, ["fed", "rate", "cpi", "inflation", "gdp", "unemployment", "jobs"]):
             return "economics_macro"
         return "economics_financial"
     return domain
+
+
+def classify_focus_scenario(title: str, category: str | None = None, tags: list[str] | None = None) -> str:
+    haystack = _norm(" ".join([title, category or "", " ".join(tags or [])]))
+    if _contains_any(haystack, CULTURE_WORDS):
+        return "culture"
+    for label, words in FOCUS_SCENARIO_WORDS:
+        if _contains_any(haystack, words):
+            return label
+    if _contains_any(haystack, ["election", "primary", "nominee", "midterm", "ballot"]):
+        return "elections"
+    if _contains_any(haystack, POLITICS_WORDS):
+        return "politics"
+    if _contains_any(haystack, ["weather", "temperature", "rain", "snow", "hurricane", "climate"]):
+        return "weather"
+    return "additional_discovered_scenario_coverage"
+
+
+def classify_market_type(title: str, market_type: str | None = None) -> str:
+    haystack = _norm(" ".join([title, market_type or ""]))
+    if " spread " in f" {haystack} " or " cover " in f" {haystack} " or re.search(
+        r"(?<!\w)[+-]\d+(?:\.\d+)?(?!\w)", haystack
+    ):
+        return "spread"
+    if any(word in haystack for word in [" total ", " over ", " under ", "above", "below"]):
+        return "total_or_threshold"
+    if any(word in haystack for word in [" prop ", "points", "rebounds", "assists", "goals", "home runs"]):
+        return "prop"
+    if any(word in haystack for word in ["future", "champion", "mvp", "win the", "winner"]):
+        return "future_or_winner"
+    return "moneyline_or_binary"
+
+
+def classify_competition_phase(title: str) -> str:
+    haystack = _norm(title)
+    if re.search(r"\bfinals?\b", haystack) or "championship" in haystack:
+        return "final_or_championship"
+    if any(word in haystack for word in ["playoff", "postseason", "quarterfinal", "semifinal", "round of"]):
+        return "playoffs_or_knockout"
+    if any(word in haystack for word in ["qualifier", "qualification", "group stage"]):
+        return "qualification_or_group"
+    return "regular_season_or_unspecified"
+
+
+def scenario_metadata(
+    title: str,
+    category: str | None = None,
+    tags: list[str] | None = None,
+    market_type: str | None = None,
+) -> dict[str, str]:
+    return {
+        "focus_scenario": classify_focus_scenario(title, category, tags),
+        "broad_scenario": classify_scenario(title, category, tags),
+        "domain": classify_domain(title, category, tags),
+        "market_type": classify_market_type(title, market_type),
+        "competition_phase": classify_competition_phase(title),
+    }
+
+
+def classify_lifecycle_phase(
+    timestamp: datetime,
+    resolution: datetime | None,
+    *,
+    is_sports: bool,
+    event_start: datetime | None = None,
+) -> str:
+    current = timestamp.astimezone(timezone.utc) if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+    close = (
+        resolution.astimezone(timezone.utc)
+        if resolution and resolution.tzinfo
+        else resolution.replace(tzinfo=timezone.utc) if resolution else None
+    )
+    start = (
+        event_start.astimezone(timezone.utc)
+        if event_start and event_start.tzinfo
+        else event_start.replace(tzinfo=timezone.utc) if event_start else None
+    )
+    if is_sports:
+        if start is not None:
+            return "sports_in_play_or_post_start" if current >= start else "sports_pregame"
+        if close is not None and timedelta(hours=0) <= close - current <= timedelta(hours=4):
+            return "sports_near_close_in_play_proxy"
+        return "sports_pregame_or_unspecified"
+    if close is None:
+        return "lifecycle_unspecified"
+    remaining = close - current
+    if remaining <= timedelta(hours=24):
+        return "lifecycle_final_24h"
+    if remaining <= timedelta(days=30):
+        return "lifecycle_30d_to_24h"
+    return "lifecycle_more_than_30d"
 
 
 def classify_phase(
@@ -179,8 +321,20 @@ def _norm(value: str) -> str:
     return " " + re.sub(r"\s+", " ", value.lower()) + " "
 
 
+def _contains_any(haystack: str, phrases) -> bool:
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", haystack)
+        for phrase in phrases
+    )
+
+
 def _parse_iso(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    normalized = value.replace("Z", "+00:00")
+    fractional = re.match(r"^(.*?\.)(\d+)([+-]\d{2}:\d{2})?$", normalized)
+    if fractional:
+        prefix, digits, offset = fractional.groups()
+        normalized = f"{prefix}{digits[:6].ljust(6, '0')}{offset or ''}"
+    return datetime.fromisoformat(normalized)
 
 
 def _parse_hour(value: str) -> datetime:

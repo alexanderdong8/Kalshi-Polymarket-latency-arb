@@ -9,6 +9,7 @@ from typing import Any
 
 from .models import MatchedMarket
 from .pmxt_client import PMXTClient, _float_or_none, _resolution_warning, market_ref
+from .strict_matching import strict_equivalence_rejection
 
 
 BAD_PAIR_PATTERNS = (
@@ -176,7 +177,7 @@ def _semantic_rejection(
             return f"semantic mismatch: {anchor}"
         if anchor in right and any(conflict in left for conflict in conflicts):
             return f"semantic mismatch: {anchor}"
-    return None
+    return strict_equivalence_rejection(left, right)
 
 
 def _pair_score(canonical: str, poly_title: str, kalshi_title: str) -> float:

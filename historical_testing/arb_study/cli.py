@@ -5,10 +5,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .annual_proxy import scan_annual_official_proxy
-from .archive import overlapping_archive_hours
+from .archive import archive_inventory, overlapping_archive_hours
 from .clusters import fetch_cluster_universe, matches_payload, normalize_clusters
 from .config import get_pmxt_api_key
 from .fillability import analyze_fillability
+from .historical_monthly import normalize_monthly_cache
 from .official_catalog import discover_official_history
 from .pmxt_client import PMXTClient, dedupe_matches, normalize_pair
 from .report import markdown_summary, write_opportunities_csv
@@ -16,6 +17,9 @@ from .scenario_report import analyze_batch_scan
 from .scanner import scan_matches, scan_matches_batch
 from .serde import matched_market_from_dict, read_json, write_json
 from .official_price_scanner import scan_official_price_histories
+from .l2_replay import run_resumable_l2_replay
+from .polymarket_us_catalog import collect_public_us_catalog, summarize_public_us_catalog, write_public_us_report
+from .research_pipeline import render_existing_research_reports, run_research_pipeline
 
 
 DEFAULT_CATEGORIES = ["Sports", "Politics", "Crypto", "Economics"]
@@ -97,7 +101,7 @@ def main() -> None:
         "discover-official-history",
         help="Discover conservative Kalshi/Polymarket catalog matches across a longer official-API window",
     )
-    official_history.add_argument("--start", required=True, help="UTC date/time, e.g. 2025-05-30T00:00:00Z")
+    official_history.add_argument("--start", required=True, help="UTC date/time, e.g. 2025-05-31T00:00:00Z")
     official_history.add_argument("--end", required=True, help="Exclusive UTC date/time")
     official_history.add_argument("--out", default="data/official_history_matches.json")
     official_history.add_argument("--cache", default="data/official_history_catalog_cache.json")
@@ -116,7 +120,8 @@ def main() -> None:
     annual_proxy.add_argument("--end", required=True)
     annual_proxy.add_argument("--out-json", default="reports/annual_official_proxy.json")
     annual_proxy.add_argument("--out-md", default="reports/annual_official_proxy.md")
-    annual_proxy.add_argument("--max-markets-per-month", type=int, default=12)
+    annual_proxy.add_argument("--checkpoint-dir", default="reports/annual_proxy_checkpoints")
+    annual_proxy.add_argument("--max-markets-per-month", type=int, default=0)
     annual_proxy.add_argument("--workers", type=int, default=6)
     annual_proxy.add_argument("--trade-size", type=int, default=100)
     annual_proxy.add_argument("--slippage-buffer", type=float, default=0.005)
@@ -133,6 +138,54 @@ def main() -> None:
 
     hours = sub.add_parser("archive-hours", help="Print currently overlapping PMXT archive hours")
     hours.add_argument("--out", default=None)
+
+    us_catalog = sub.add_parser("public-us-catalog", help="Collect the public Polymarket US scenario catalog")
+    us_catalog.add_argument("--cache", default="data/polymarket_us_public_catalog.json")
+    us_catalog.add_argument("--out-json", default="reports/polymarket_us_public_catalog_summary.json")
+    us_catalog.add_argument("--out-md", default="POLYMARKET_US_PUBLIC_CATALOG_ANALYSIS.md")
+    us_catalog.add_argument("--max-pages", type=int, default=None)
+    us_catalog.add_argument("--terminal-summary-limit", type=int, default=100)
+    us_catalog.add_argument("--fresh", action="store_true")
+
+    l2_replay = sub.add_parser("l2-replay", help="Run resumable PMXT full-book VWAP replay")
+    l2_replay.add_argument("--matches", default="data/cluster_matches.json")
+    l2_replay.add_argument("--checkpoint-dir", default="reports/pmxt_l2_checkpoints")
+    l2_replay.add_argument("--out", default="reports/pmxt_l2_replay.json")
+    l2_replay.add_argument("--max-hours", type=int, default=None)
+    l2_replay.add_argument("--fresh", action="store_true")
+
+    research = sub.add_parser("run-research", help="Run the resumable three-layer research pipeline")
+    research.add_argument("--start", required=True)
+    research.add_argument("--end", required=True)
+    research.add_argument("--root-dir", default=".")
+    research.add_argument("--resume", action="store_true", help="Resume checkpoints (the default unless --fresh is used)")
+    research.add_argument("--fresh", action="store_true")
+    research.add_argument("--skip-international", action="store_true")
+    research.add_argument("--skip-annual-proxy", action="store_true")
+    research.add_argument("--skip-pmxt-replay", action="store_true")
+    research.add_argument("--skip-us-catalog", action="store_true")
+    research.add_argument("--kalshi-historical-pages", type=int, default=500)
+    research.add_argument("--polymarket-pages-per-month", type=int, default=100)
+    research.add_argument("--annual-proxy-markets-per-month", type=int, default=25)
+    research.add_argument("--max-pmxt-hours", type=int, default=None)
+    research.add_argument("--max-us-pages", type=int, default=None)
+    research.add_argument("--terminal-summary-limit", type=int, default=100)
+
+    render_research = sub.add_parser(
+        "render-research-reports",
+        help="Rewrite reader-facing Markdown and CSV files from persisted research artifacts",
+    )
+    render_research.add_argument("--root-dir", default=".")
+
+    normalize_annual = sub.add_parser(
+        "normalize-annual-cache",
+        help="Rebuild strict cross-venue pairs and retained-catalog category counts from the annual cache",
+    )
+    normalize_annual.add_argument("--cache", default="data/annual_official_catalog_cache.json")
+    normalize_annual.add_argument("--out", default="data/annual_official_matches.json")
+    normalize_annual.add_argument("--start", required=True)
+    normalize_annual.add_argument("--end", required=True)
+    normalize_annual.add_argument("--min-score", type=float, default=0.78)
 
     args = parser.parse_args()
     if args.command == "discover":
@@ -159,6 +212,16 @@ def main() -> None:
         run_sample(args)
     elif args.command == "archive-hours":
         run_archive_hours(args)
+    elif args.command == "public-us-catalog":
+        run_public_us_catalog(args)
+    elif args.command == "l2-replay":
+        run_l2_replay(args)
+    elif args.command == "run-research":
+        run_research(args)
+    elif args.command == "render-research-reports":
+        run_render_research_reports(args)
+    elif args.command == "normalize-annual-cache":
+        run_normalize_annual_cache(args)
 
 
 def run_discover(args: argparse.Namespace) -> None:
@@ -344,6 +407,8 @@ def run_annual_proxy_report(args: argparse.Namespace) -> None:
         kalshi_fee_mode=args.kalshi_fee_mode,
         polymarket_fallback_fee_rate=args.polymarket_fallback_fee_rate,
         catalog_meta=payload.get("meta", {}),
+        checkpoint_dir=args.checkpoint_dir,
+        resume=True,
     )
     print(
         f"Annual proxy scanned {result['parameters']['selected_markets']} markets; "
@@ -395,13 +460,89 @@ def run_sample(args: argparse.Namespace) -> None:
 
 
 def run_archive_hours(args: argparse.Namespace) -> None:
-    hours = overlapping_archive_hours()
-    payload = {"count": len(hours), "hours": hours}
+    payload = archive_inventory()
+    hours = payload["hours"]
     if args.out:
         write_json(args.out, payload)
     print(f"overlapping_hours={len(hours)}")
     if hours:
         print(f"first={hours[0]} last={hours[-1]}")
+
+
+def run_public_us_catalog(args: argparse.Namespace) -> None:
+    cache = collect_public_us_catalog(
+        args.cache,
+        resume=not args.fresh,
+        max_pages=args.max_pages,
+        terminal_summary_limit=args.terminal_summary_limit,
+    )
+    result = summarize_public_us_catalog(cache)
+    write_json(args.out_json, result)
+    write_public_us_report(result, args.out_md, "reports/coverage_manifest.md")
+    print(
+        f"Collected {result['events']} public Polymarket US events and "
+        f"{result['unique_embedded_markets']} unique embedded markets; wrote {args.out_md}"
+    )
+
+
+def run_l2_replay(args: argparse.Namespace) -> None:
+    payload = read_json(args.matches)
+    matches = [matched_market_from_dict(item) for item in payload.get("matches", [])]
+    inventory = archive_inventory()
+    result = run_resumable_l2_replay(
+        matches,
+        inventory["hours"],
+        args.checkpoint_dir,
+        resume=not args.fresh,
+        max_hours=args.max_hours,
+    )
+    write_json(args.out, result)
+    print(
+        f"L2 replay completed {result['parameters']['hours_completed']} hours; "
+        f"net-positive windows={result['summary']['net_positive_windows']}; wrote {args.out}"
+    )
+
+
+def run_research(args: argparse.Namespace) -> None:
+    result = run_research_pipeline(
+        start=args.start,
+        end=args.end,
+        root_dir=args.root_dir,
+        resume=not args.fresh,
+        collect_international=not args.skip_international,
+        run_annual_proxy=not args.skip_annual_proxy,
+        run_pmxt_replay=not args.skip_pmxt_replay,
+        collect_us_catalog=not args.skip_us_catalog,
+        kalshi_historical_pages=args.kalshi_historical_pages,
+        polymarket_pages_per_month=args.polymarket_pages_per_month,
+        annual_proxy_markets_per_month=args.annual_proxy_markets_per_month,
+        max_pmxt_hours=args.max_pmxt_hours,
+        max_us_pages=args.max_us_pages,
+        terminal_summary_limit=args.terminal_summary_limit,
+    )
+    manifest = result["manifest"]
+    print(
+        "Research pipeline complete; "
+        f"manifest layers={len(manifest['evidence_layers'])}; "
+        f"wrote {Path(args.root_dir) / 'reports' / 'coverage_manifest.md'}"
+    )
+
+
+def run_render_research_reports(args: argparse.Namespace) -> None:
+    result = render_existing_research_reports(args.root_dir)
+    print(
+        "Rewrote reader-facing research reports; "
+        f"annual proxy windows={len(result['annual_proxy'].get('opportunity_windows') or [])}; "
+        f"wrote {Path(args.root_dir) / 'ANNUAL_SCENARIO_ANALYSIS.md'}"
+    )
+
+
+def run_normalize_annual_cache(args: argparse.Namespace) -> None:
+    result = normalize_monthly_cache(args.cache, args.out, args.start, args.end, min_score=args.min_score)
+    print(
+        f"Rebuilt annual strict match index with {result['meta']['matched_pairs']} pairs; "
+        f"wrote {args.out}"
+    )
 
 
 def _exclusive_end_hour(hour: str) -> str:
