@@ -151,7 +151,7 @@ def test_scenario_taxonomy_covers_focus_phase_and_market_type() -> None:
     assert classify_focus_scenario("Will Kai Cenat win Streamer of the Year at the 2025 Streamer Awards?") == "culture"
     assert classify_focus_scenario("Will Lando Norris win the F1 Monaco Grand Prix?") == "f1"
     assert classify_focus_scenario("2025 PGA TOUR FedEx St. Jude Championship") == "golf"
-    assert classify_competition_phase("NBA playoff semifinal") == "playoffs_or_knockout"
+    assert classify_competition_phase("NBA playoff semifinal") == "semifinal"
     assert classify_market_type("Knicks -3.5 point spread") == "spread"
     assert classify_market_type("Will total points be over 214.5?") == "total_or_threshold"
 

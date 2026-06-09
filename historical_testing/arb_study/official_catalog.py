@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -10,10 +11,18 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+from .llm_adjudication import OpenAIAdjudicator, candidate_payload
 from .models import MatchedMarket, MarketRef, OutcomeRef
 from .official_api import KalshiOfficialClient, PolymarketGammaClient
 from .scenario import classify_domain
 from .serde import matched_market_from_dict, read_json, write_json
+from .sports_identity import (
+    SportsIdentity,
+    canonical_outcome,
+    compatible_candidate,
+    event_start_distance_hours,
+    sports_identity,
+)
 from .strict_matching import (
     strict_equivalence_rejection,
     strict_match_rejection,
@@ -21,8 +30,9 @@ from .strict_matching import (
 )
 
 
-CACHE_VERSION = 2
-MATCHING_GATE_VERSION = 4
+CACHE_VERSION = 3
+MATCHING_GATE_VERSION = 6
+POLY_RECORD_CACHE_VERSION = 5
 STOP_WORDS = {
     "a",
     "an",
@@ -193,6 +203,7 @@ def match_official_catalogs(
     *,
     poly_records: list[dict[str, Any]] | None = None,
     progress_label: str | None = None,
+    adjudicator: OpenAIAdjudicator | None = None,
 ) -> tuple[list[MatchedMarket], list[dict[str, Any]]]:
     if poly_records is None:
         poly_records = [_poly_record(item) for item in polymarket_markets]
@@ -201,9 +212,11 @@ def match_official_catalogs(
     for pos, item in enumerate(poly_records):
         for token in item["tokens"]:
             index[token].add(pos)
+    sports_index = _sports_candidate_index(poly_records)
 
     matches: list[MatchedMarket] = []
     rejected: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
     for index_position, kalshi in enumerate(kalshi_markets, start=1):
         if progress_label and index_position % 10_000 == 0:
             print(
@@ -214,11 +227,14 @@ def match_official_catalogs(
         kalshi_record = _kalshi_record(kalshi)
         if not kalshi_record:
             continue
-        candidate_positions = _candidate_positions(
-            kalshi_record["tokens"],
-            index,
-            require_two_shared_tokens=True,
-        )
+        if kalshi_record["identity"].is_sports:
+            candidate_positions = _structured_candidate_positions(kalshi_record["identity"], sports_index)
+        else:
+            candidate_positions = _candidate_positions(
+                kalshi_record["tokens"],
+                index,
+                require_two_shared_tokens=True,
+            )
         scored = []
         for pos in candidate_positions:
             poly_record = poly_records[pos]
@@ -228,7 +244,12 @@ def match_official_catalogs(
         scored.sort(key=lambda item: item["score"], reverse=True)
         if not scored or scored[0]["score"] < min_score:
             continue
-        if len(scored) > 1 and scored[1]["score"] >= min_score and scored[0]["score"] - scored[1]["score"] < 0.03:
+        if (
+            len(scored) > 1
+            and scored[1]["score"] >= min_score
+            and scored[0]["score"] - scored[1]["score"] < 0.03
+            and not _same_structured_candidate(scored[0]["poly"], scored[1]["poly"])
+        ):
             rejected.append(
                 {
                     "kalshi_ticker": kalshi_record["raw"]["ticker"],
@@ -238,7 +259,43 @@ def match_official_catalogs(
             )
             continue
         best = scored[0]
-        match = _build_match(kalshi_record, best["poly"], best)
+        deterministic_rejection = _deterministic_pair_rejection(kalshi_record, best["poly"])
+        if deterministic_rejection:
+            rejected.append(
+                {
+                    "kalshi_ticker": kalshi_record["raw"]["ticker"],
+                    "polymarket_id": best["poly"]["raw"].get("id"),
+                    "reason": deterministic_rejection,
+                }
+            )
+            continue
+        pending.append({"kalshi": kalshi_record, "best": best})
+
+    decisions = None
+    if adjudicator and pending:
+        decisions = adjudicator.adjudicate_many(
+            [
+                candidate_payload(
+                    item["kalshi"]["raw"],
+                    item["best"]["poly"]["raw"],
+                    _structured_pair_payload(item["kalshi"], item["best"]["poly"]),
+                )
+                for item in pending
+            ]
+        )
+    for position, item in enumerate(pending):
+        decision = decisions[position] if decisions else None
+        if decision and decision.decision != "exact_locked_pair":
+            rejected.append(
+                {
+                    "kalshi_ticker": item["kalshi"]["raw"]["ticker"],
+                    "polymarket_id": item["best"]["poly"]["raw"].get("id"),
+                    "reason": decision.decision,
+                    "adjudication": asdict(decision),
+                }
+            )
+            continue
+        match = _build_match(item["kalshi"], item["best"]["poly"], item["best"], decision)
         if match:
             matches.append(match)
 
@@ -251,6 +308,8 @@ def match_official_catalogs_monthly(
     polymarket_markets: list[dict[str, Any]],
     min_score: float = 0.78,
     checkpoint_dir: str | Path | None = None,
+    adjudicator: OpenAIAdjudicator | None = None,
+    poly_records_cache_path: str | Path | None = None,
 ) -> tuple[list[MatchedMarket], list[dict[str, Any]]]:
     kalshi_by_month: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for market in kalshi_markets:
@@ -260,8 +319,7 @@ def match_official_catalogs_monthly(
 
     matches = []
     rejected = []
-    poly_records = [_poly_record(item) for item in polymarket_markets]
-    poly_records = [item for item in poly_records if item]
+    poly_records = _load_or_build_poly_records(polymarket_markets, poly_records_cache_path)
     checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else None
     if checkpoint_root:
         checkpoint_root.mkdir(parents=True, exist_ok=True)
@@ -278,6 +336,7 @@ def match_official_catalogs_monthly(
             and checkpoint_payload.get("nearby_polymarket") == len(nearby_poly_records)
             and checkpoint_payload.get("min_score") == min_score
             and checkpoint_payload.get("matching_gate_version") == MATCHING_GATE_VERSION
+            and checkpoint_payload.get("adjudication_enabled") == bool(adjudicator)
         ):
             monthly_matches = [
                 matched_market_from_dict(item) for item in checkpoint_payload.get("matches", [])
@@ -290,6 +349,7 @@ def match_official_catalogs_monthly(
                 min_score=min_score,
                 poly_records=nearby_poly_records,
                 progress_label=month,
+                adjudicator=adjudicator,
             )
             if checkpoint:
                 write_json(
@@ -300,6 +360,7 @@ def match_official_catalogs_monthly(
                         "nearby_polymarket": len(nearby_poly_records),
                         "min_score": min_score,
                         "matching_gate_version": MATCHING_GATE_VERSION,
+                        "adjudication_enabled": bool(adjudicator),
                         "matches": [asdict(match) for match in monthly_matches],
                         "rejected": monthly_rejected,
                     },
@@ -313,6 +374,69 @@ def match_official_catalogs_monthly(
         )
     deduped = {match.match_id: match for match in matches}
     return sorted(deduped.values(), key=lambda item: (item.kalshi.resolution_date or "", item.match_id)), rejected
+
+
+def _load_or_build_poly_records(
+    polymarket_markets: list[dict[str, Any]],
+    cache_path: str | Path | None,
+) -> list[dict[str, Any]]:
+    target = Path(cache_path) if cache_path else None
+    if target and target.exists():
+        try:
+            with target.open("rb") as handle:
+                payload = pickle.load(handle)
+            if (
+                payload.get("record_cache_version", payload.get("matching_gate_version"))
+                == POLY_RECORD_CACHE_VERSION
+                and payload.get("source_market_count") == len(polymarket_markets)
+            ):
+                records = payload["records"]
+                refreshed = _refresh_suspect_team_identities(records)
+                print(
+                    f"Loaded {len(records)} normalized Polymarket records from {target}; "
+                    f"refreshed {refreshed} single-participant team identities",
+                    flush=True,
+                )
+                return records
+        except Exception:  # noqa: BLE001
+            pass
+    records = [_poly_record(item) for item in polymarket_markets]
+    records = [item for item in records if item]
+    if target and len(polymarket_markets) <= 250_000:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(f"{target.suffix}.tmp")
+        with temporary.open("wb") as handle:
+            pickle.dump(
+                {
+                    "record_cache_version": POLY_RECORD_CACHE_VERSION,
+                    "source_market_count": len(polymarket_markets),
+                    "records": records,
+                },
+                handle,
+                protocol=pickle.HIGHEST_PROTOCOL,
+            )
+        temporary.replace(target)
+        print(f"Cached {len(records)} normalized Polymarket records at {target}", flush=True)
+    elif target:
+        print(
+            f"Skipped normalized-record serialization for {len(polymarket_markets)} Polymarket markets; "
+            "the source catalog is too large for the legacy duplicated cache format.",
+            flush=True,
+        )
+    return records
+
+
+def _refresh_suspect_team_identities(records: list[dict[str, Any]]) -> int:
+    refreshed = 0
+    for record in records:
+        identity: SportsIdentity = record["identity"]
+        if identity.league not in {"nba", "mlb", "nhl", "wnba"} or len(identity.participants) >= 2:
+            continue
+        updated = sports_identity(record["raw"], "polymarket")
+        if updated != identity:
+            record["identity"] = updated
+            refreshed += 1
+    return refreshed
 
 
 def _fetch_kalshi_events(
@@ -346,19 +470,21 @@ def _fetch_polymarket_month(
     client: PolymarketGammaClient,
     start: datetime,
     end: datetime,
-    max_pages: int,
+    max_pages: int | None,
 ) -> dict[str, Any]:
     markets: list[dict[str, Any]] = []
     cursor = None
     truncated = False
-    for page in range(max_pages):
+    page = 0
+    while max_pages in {None, 0} or page < max_pages:
         data = client.market_page(start.isoformat(), end.isoformat(), cursor=cursor, limit=100)
         rows = list(data.get("markets") or [])
         markets.extend(_trim_poly_market(item) for item in rows)
         cursor = data.get("next_cursor")
         if not cursor or not rows:
             break
-        if page == max_pages - 1:
+        page += 1
+        if max_pages not in {None, 0} and page == max_pages:
             truncated = True
     return {"markets": markets, "truncated": truncated}
 
@@ -417,6 +543,7 @@ def _kalshi_record(raw: dict[str, Any]) -> dict[str, Any] | None:
         "domain": classify_domain(title),
         "date": _parse_optional(raw.get("close_time") or raw.get("expiration_time")),
         "yes_label": raw.get("yes_sub_title") or raw.get("title") or "Yes",
+        "identity": sports_identity(raw, "kalshi"),
     }
 
 
@@ -439,6 +566,7 @@ def _poly_record(raw: dict[str, Any]) -> dict[str, Any] | None:
         "date": _parse_optional(raw.get("endDate") or raw.get("closedTime")),
         "outcomes": [str(item) for item in outcomes],
         "token_ids": [str(item) for item in token_ids],
+        "identity": sports_identity(raw, "polymarket"),
     }
 
 
@@ -448,6 +576,11 @@ def _score_pair(
     *,
     min_score: float = 0.0,
 ) -> dict[str, Any] | None:
+    structured_sports = kalshi["identity"].is_sports and poly["identity"].is_sports
+    if kalshi["identity"].is_sports != poly["identity"].is_sports:
+        return None
+    if structured_sports:
+        return _score_sports_pair(kalshi, poly)
     if not kalshi["tokens"] or not poly["tokens"]:
         return None
     if _is_sports(kalshi["domain"]) != _is_sports(poly["domain"]):
@@ -490,7 +623,12 @@ def _score_pair(
     }
 
 
-def _build_match(kalshi: dict[str, Any], poly: dict[str, Any], score: dict[str, Any]) -> MatchedMarket | None:
+def _build_match(
+    kalshi: dict[str, Any],
+    poly: dict[str, Any],
+    score: dict[str, Any],
+    adjudication: Any | None = None,
+) -> MatchedMarket | None:
     oriented = score["oriented"]
     kalshi_raw = kalshi["raw"]
     poly_raw = poly["raw"]
@@ -500,7 +638,10 @@ def _build_match(kalshi: dict[str, Any], poly: dict[str, Any], score: dict[str, 
         warnings.append(f"Resolution dates differ by {drift} days.")
     if oriented["nonstandard"]:
         warnings.append("Polymarket outcomes were oriented from outcome labels; manually verify the side mapping.")
-    warnings.append("Official catalog title match; manually verify both resolution rulebooks before trading.")
+    if adjudication:
+        warnings.append("OpenAI structured adjudication classified this as an exact locked pair.")
+    else:
+        warnings.append("Deterministic structured candidate; semantic API adjudication was not enabled.")
     warning = " ".join(warnings)
     ticker = str(kalshi_raw["ticker"])
     poly_id = str(poly_raw.get("conditionId") or poly_raw.get("id"))
@@ -532,13 +673,10 @@ def _build_match(kalshi: dict[str, Any], poly: dict[str, Any], score: dict[str, 
             no=OutcomeRef(f"{ticker}-NO", "No"),
             raw=kalshi_raw,
         ),
-        relation="official_catalog_title_match",
+        relation="official_structured_identity_exact_pair",
         confidence=float(score["score"]),
         price_difference=None,
-        reasoning=(
-            f"local official catalog match: sequence={score['sequence']:.3f}, "
-            f"jaccard={score['jaccard']:.3f}, label={score['label_score']:.3f}"
-        ),
+        reasoning=_match_reasoning(score, adjudication),
         resolution_date_warning=warning,
     )
 
@@ -558,7 +696,22 @@ def _orient_poly_outcomes(poly: dict[str, Any], kalshi_yes_label: str) -> dict[s
             "label_score": 1.0,
             "nonstandard": False,
         }
-    scores = [SequenceMatcher(None, _norm(kalshi_yes_label), _norm(label)).ratio() for label in outcomes]
+    league = poly["identity"].league
+    canonical_yes = canonical_outcome(kalshi_yes_label, league)
+    canonical_labels = [canonical_outcome(label, league) for label in outcomes]
+    exact = [pos for pos, label in enumerate(canonical_labels) if label == canonical_yes]
+    if len(exact) == 1:
+        yes_pos = exact[0]
+        no_pos = 1 - yes_pos
+        return {
+            "yes_token": tokens[yes_pos],
+            "yes_label": outcomes[yes_pos],
+            "no_token": tokens[no_pos],
+            "no_label": outcomes[no_pos],
+            "label_score": 1.0,
+            "nonstandard": True,
+        }
+    scores = [SequenceMatcher(None, canonical_yes, label).ratio() for label in canonical_labels]
     yes_pos = max(range(2), key=lambda pos: scores[pos])
     no_pos = 1 - yes_pos
     if scores[yes_pos] < 0.55 or scores[yes_pos] - scores[no_pos] < 0.10:
@@ -579,6 +732,21 @@ def _candidate_summary(candidate: dict[str, Any]) -> dict[str, Any]:
         "polymarket_id": candidate["poly"]["raw"].get("id"),
         "polymarket_title": candidate["poly"]["raw"].get("question"),
     }
+
+
+def _same_structured_candidate(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_identity: SportsIdentity = left["identity"]
+    right_identity: SportsIdentity = right["identity"]
+    return bool(
+        left_identity.is_sports
+        and right_identity.is_sports
+        and left_identity.league == right_identity.league
+        and set(left_identity.participants) == set(right_identity.participants)
+        and left_identity.market_type == right_identity.market_type
+        and left_identity.line == right_identity.line
+        and left_identity.period == right_identity.period
+        and left_identity.round_name == right_identity.round_name
+    )
 
 
 def _trim_kalshi_market(raw: dict[str, Any]) -> dict[str, Any]:
@@ -637,6 +805,117 @@ def _trim_poly_market(raw: dict[str, Any]) -> dict[str, Any]:
         "volume",
     ]
     return {key: raw.get(key) for key in keys}
+
+
+def _sports_candidate_index(poly_records: list[dict[str, Any]]) -> dict[tuple[str, str], set[int]]:
+    index: dict[tuple[str, str], set[int]] = defaultdict(set)
+    for pos, record in enumerate(poly_records):
+        identity: SportsIdentity = record["identity"]
+        if not identity.is_sports:
+            continue
+        index[(identity.league, "*")].add(pos)
+        for participant in identity.participants:
+            index[(identity.league, participant)].add(pos)
+    return index
+
+
+def _structured_candidate_positions(
+    identity: SportsIdentity,
+    index: dict[tuple[str, str], set[int]],
+) -> set[int]:
+    participant_buckets = [
+        index.get((identity.league, participant), set())
+        for participant in identity.participants
+    ]
+    participant_buckets = [bucket for bucket in participant_buckets if bucket]
+    if len(participant_buckets) >= 2:
+        return set.intersection(*participant_buckets)
+    if participant_buckets:
+        return set.union(*participant_buckets)
+    return set(index.get((identity.league, "*"), set()))
+
+
+def _score_sports_pair(kalshi: dict[str, Any], poly: dict[str, Any]) -> dict[str, Any] | None:
+    left: SportsIdentity = kalshi["identity"]
+    right: SportsIdentity = poly["identity"]
+    if not compatible_candidate(left, right):
+        return None
+    oriented = _orient_poly_outcomes(poly, kalshi["yes_label"])
+    if not oriented:
+        return None
+    participant_score = (
+        len(set(left.participants) & set(right.participants))
+        / max(len(set(left.participants) | set(right.participants)), 1)
+    )
+    drift_hours = event_start_distance_hours(left, right)
+    time_score = 0.5 if drift_hours is None else max(0.0, 1.0 - drift_hours / 36.0)
+    score = 0.75 + (0.10 * participant_score) + (0.05 * time_score) + (0.10 * oriented["label_score"])
+    return {
+        "score": score,
+        "sequence": SequenceMatcher(None, kalshi["title_norm"], poly["title_norm"]).ratio(),
+        "jaccard": participant_score,
+        "label_score": oriented["label_score"],
+        "date_drift_days": (
+            None if drift_hours is None else int(drift_hours // 24)
+        ),
+        "event_start_drift_hours": drift_hours,
+        "poly": poly,
+        "oriented": oriented,
+        "structured_sports": True,
+    }
+
+
+def _deterministic_pair_rejection(kalshi: dict[str, Any], poly: dict[str, Any]) -> str | None:
+    left: SportsIdentity = kalshi["identity"]
+    right: SportsIdentity = poly["identity"]
+    if left.is_sports or right.is_sports:
+        if not compatible_candidate(left, right):
+            return "structured sports identity mismatch"
+        if left.outcome and right.participants and left.outcome not in right.participants:
+            return "selected outcome is not a participant in the Polymarket event"
+        return None
+    if strict_match_rejection(kalshi["question_title"], poly["question_title"]):
+        return strict_match_rejection(kalshi["question_title"], poly["question_title"])
+    if strict_outcome_label_rejection(poly["question_title"], kalshi["yes_label"]):
+        return strict_outcome_label_rejection(poly["question_title"], kalshi["yes_label"])
+    return strict_equivalence_rejection(kalshi["semantic_text"], poly["semantic_text"])
+
+
+def _structured_pair_payload(kalshi: dict[str, Any], poly: dict[str, Any]) -> dict[str, Any]:
+    left: SportsIdentity = kalshi["identity"]
+    right: SportsIdentity = poly["identity"]
+    return {
+        "kalshi": _identity_payload(left),
+        "polymarket": _identity_payload(right),
+        "oriented_polymarket_outcomes": _orient_poly_outcomes(poly, kalshi["yes_label"]),
+        "event_start_drift_hours": event_start_distance_hours(left, right),
+    }
+
+
+def _identity_payload(identity: SportsIdentity) -> dict[str, Any]:
+    return {
+        "league": identity.league,
+        "participants": list(identity.participants),
+        "outcome": identity.outcome,
+        "event_start": identity.event_start.isoformat() if identity.event_start else None,
+        "market_type": identity.market_type,
+        "line": identity.line,
+        "period": identity.period,
+        "round_name": identity.round_name,
+    }
+
+
+def _match_reasoning(score: dict[str, Any], adjudication: Any | None) -> str:
+    base = (
+        f"structured catalog match: score={score['score']:.3f}, "
+        f"participant_similarity={score['jaccard']:.3f}, label={score['label_score']:.3f}"
+    )
+    if not adjudication:
+        return base
+    return (
+        f"{base}; OpenAI decision={adjudication.decision}, "
+        f"confidence={adjudication.confidence:.3f}, reason={adjudication.reason}"
+    )
 
 
 def _load_cache(path: str | Path) -> dict[str, Any]:

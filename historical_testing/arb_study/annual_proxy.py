@@ -664,6 +664,9 @@ def _strict_title_equivalent_matches(
     accepted = []
     rejected = []
     for match in matches:
+        if match.relation == "official_structured_identity_exact_pair":
+            accepted.append(match)
+            continue
         reason = strict_market_rejection(match)
         if reason:
             rejected.append({"match_id": match.match_id, "reason": reason})

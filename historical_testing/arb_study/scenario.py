@@ -201,13 +201,61 @@ def classify_market_type(title: str, market_type: str | None = None) -> str:
 
 def classify_competition_phase(title: str) -> str:
     haystack = _norm(title)
-    if re.search(r"\bfinals?\b", haystack) or "championship" in haystack:
-        return "final_or_championship"
-    if any(word in haystack for word in ["playoff", "postseason", "quarterfinal", "semifinal", "round of"]):
-        return "playoffs_or_knockout"
+    phase_markers = (
+        ("world_series", ("world series",)),
+        ("league_finals", ("nba finals", "wnba finals", "stanley cup final", "mls cup")),
+        ("conference_final", ("conference final", "championship series", "alcs", "nlcs")),
+        ("semifinal", ("semifinal", "semi final")),
+        ("division_series", ("division series", "alds", "nlds")),
+        ("quarterfinal", ("quarterfinal", "quarter final")),
+        ("wild_card", ("wild card", "wildcard")),
+        ("play_in", ("play in", "play-in")),
+        ("first_round", ("first round", "round 1")),
+        ("round_of_16", ("round of 16",)),
+        ("round_of_32", ("round of 32",)),
+        ("final_or_championship", (" final ", " finals ", "championship")),
+        ("playoffs_or_knockout", ("playoff", "postseason", "knockout")),
+    )
+    padded = f" {haystack.strip()} "
+    for label, markers in phase_markers:
+        if any(marker in padded for marker in markers):
+            return label
     if any(word in haystack for word in ["qualifier", "qualification", "group stage"]):
         return "qualification_or_group"
     return "regular_season_or_unspecified"
+
+
+def classify_tournament_level(title: str) -> str:
+    haystack = _norm(title)
+    if any(item in haystack for item in ["australian open", "roland garros", "french open", "wimbledon", "us open"]):
+        return "grand_slam"
+    if any(item in haystack for item in ["atp finals", "wta finals"]):
+        return "tour_finals"
+    if re.search(r"\b(?:atp|wta)\s*1000\b", haystack) or "masters 1000" in haystack:
+        return "masters_1000"
+    if re.search(r"\b(?:atp|wta)\s*500\b", haystack):
+        return "tour_500"
+    if re.search(r"\b(?:atp|wta)\s*250\b", haystack):
+        return "tour_250"
+    if "itf" in haystack:
+        return "itf"
+    if "title fight" in haystack or "championship bout" in haystack:
+        return "title_fight"
+    if "main event" in haystack:
+        return "main_event"
+    if "main card" in haystack:
+        return "main_card"
+    if "prelim" in haystack:
+        return "prelim"
+    if "qualifying" in haystack:
+        return "qualifying"
+    if "sprint" in haystack:
+        return "sprint"
+    if "practice" in haystack:
+        return "practice"
+    if "grand prix" in haystack or re.search(r"\bf1\b", haystack):
+        return "race_or_f1_unspecified"
+    return "not_applicable_or_unspecified"
 
 
 def scenario_metadata(
@@ -222,6 +270,7 @@ def scenario_metadata(
         "domain": classify_domain(title, category, tags),
         "market_type": classify_market_type(title, market_type),
         "competition_phase": classify_competition_phase(title),
+        "tournament_level": classify_tournament_level(title),
     }
 
 

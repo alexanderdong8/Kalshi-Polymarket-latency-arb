@@ -12,6 +12,7 @@ from .archive import archive_inventory
 from .historical_monthly import collect_monthly_cache, normalize_monthly_cache, write_coverage_report
 from .l2_replay import run_resumable_l2_replay
 from .polymarket_us_catalog import collect_public_us_catalog, summarize_public_us_catalog, write_public_us_report
+from .rankings import build_leaderboards
 from .serde import matched_market_from_dict, read_json, write_json
 from .research_config import ADDITIONAL_DISCOVERED_SECTION, FOCUS_SCENARIOS, HEADLINE_ORDER_SIZE
 from .scenario import classify_focus_scenario
@@ -103,6 +104,7 @@ def run_research_pipeline(
     max_pmxt_hours: int | None = None,
     max_us_pages: int | None = None,
     terminal_summary_limit: int = 100,
+    openai_budget_usd: float = 7.0,
 ) -> dict[str, Any]:
     root = Path(root_dir)
     data = root / "data"
@@ -158,9 +160,17 @@ def run_research_pipeline(
             kalshi_historical_pages=kalshi_historical_pages,
             polymarket_pages_per_month=polymarket_pages_per_month,
             resume=resume,
+            retry_truncated=True,
         )
         coverage = write_coverage_report(cache_path, reports / "annual_official_catalog_coverage.md")
-        matches_payload = normalize_monthly_cache(cache_path, official_matches_path, start, end)
+        matches_payload = normalize_monthly_cache(
+            cache_path,
+            official_matches_path,
+            start,
+            end,
+            openai_budget_usd=openai_budget_usd,
+            adjudication_cache_path=data / "openai_match_adjudications.json",
+        )
         capped_catalog = any(
             row.get("kalshi_truncated") or row.get("polymarket_truncated")
             for row in coverage.get("months", [])
@@ -217,8 +227,9 @@ def run_research_pipeline(
 
     l2_result = None
     cluster_matches_path = data / "cluster_matches.json"
-    if run_pmxt_replay and cluster_matches_path.exists():
-        payload = read_json(cluster_matches_path)
+    l2_matches_path = official_matches_path if official_matches_path.exists() else cluster_matches_path
+    if run_pmxt_replay and l2_matches_path.exists():
+        payload = read_json(l2_matches_path)
         matches = [matched_market_from_dict(item) for item in payload.get("matches", [])]
         l2_result = run_resumable_l2_replay(
             matches,
@@ -238,23 +249,38 @@ def run_research_pipeline(
 
     write_manifest_markdown(manifest, reports / "coverage_manifest.md")
     _write_csv(reports / "coverage_manifest.csv", _manifest_csv_rows(manifest))
+    leaderboards = build_leaderboards(annual_result, l2_result)
+    write_json(reports / "scenario_leaderboards.json", leaderboards)
+    _write_csv(reports / "category_leaderboard.csv", leaderboards["category_leaderboard"])
+    _write_csv(reports / "subscenario_leaderboard.csv", leaderboards["subscenario_leaderboard"])
     trade_examples = _trade_examples(l2_result, annual_result)
     write_json(reports / "arbitrage_trade_examples.json", trade_examples)
     _write_csv(reports / "arbitrage_trade_examples.csv", trade_examples["examples"])
     write_trade_examples_report(trade_examples, root / "ARBITRAGE_TRADE_EXAMPLES.md")
+    write_matching_audit(
+        read_json(official_matches_path) if official_matches_path.exists() else {},
+        reports / "MATCHING_AUDIT.md",
+    )
     write_scenario_analysis_report(
         manifest,
         trade_examples,
         l2_result,
         annual_result,
         root / "ANNUAL_SCENARIO_ANALYSIS.md",
+        leaderboards=leaderboards,
     )
-    write_research_summary(manifest, trade_examples, root / "RESEARCH_SUMMARY.md")
+    write_research_summary(
+        manifest,
+        trade_examples,
+        root / "RESEARCH_SUMMARY.md",
+        leaderboards=leaderboards,
+    )
     return {
         "manifest": manifest,
         "annual_proxy": annual_result,
         "pmxt_l2": l2_result,
         "polymarket_us": us_summary,
+        "leaderboards": leaderboards,
     }
 
 
@@ -309,17 +335,39 @@ def render_existing_research_reports(root_dir: str | Path = ".") -> dict[str, An
     _write_csv(reports / "annual_focus_category_coverage.csv", annual_result.get("coverage_by_focus_scenario") or [])
     _write_csv(reports / "annual_official_proxy_portfolio.csv", annual_result.get("portfolio_appendix") or [])
     write_annual_catalog_funnel(annual_result, reports / "annual_catalog_funnel.md")
+    leaderboards = build_leaderboards(annual_result, l2_result)
+    write_json(reports / "scenario_leaderboards.json", leaderboards)
+    _write_csv(reports / "category_leaderboard.csv", leaderboards["category_leaderboard"])
+    _write_csv(reports / "subscenario_leaderboard.csv", leaderboards["subscenario_leaderboard"])
     trade_examples = _trade_examples(l2_result, annual_result)
     write_json(reports / "arbitrage_trade_examples.json", trade_examples)
     _write_csv(reports / "arbitrage_trade_examples.csv", trade_examples["examples"])
     write_trade_examples_report(trade_examples, root / "ARBITRAGE_TRADE_EXAMPLES.md")
-    write_scenario_analysis_report(manifest, trade_examples, l2_result, annual_result, root / "ANNUAL_SCENARIO_ANALYSIS.md")
-    write_research_summary(manifest, trade_examples, root / "RESEARCH_SUMMARY.md")
+    official_matches_path = root / "data" / "annual_official_matches.json"
+    write_matching_audit(
+        read_json(official_matches_path) if official_matches_path.exists() else {},
+        reports / "MATCHING_AUDIT.md",
+    )
+    write_scenario_analysis_report(
+        manifest,
+        trade_examples,
+        l2_result,
+        annual_result,
+        root / "ANNUAL_SCENARIO_ANALYSIS.md",
+        leaderboards=leaderboards,
+    )
+    write_research_summary(
+        manifest,
+        trade_examples,
+        root / "RESEARCH_SUMMARY.md",
+        leaderboards=leaderboards,
+    )
     return {
         "manifest": manifest,
         "annual_proxy": annual_result,
         "pmxt_l2": l2_result,
         "trade_examples": trade_examples,
+        "leaderboards": leaderboards,
     }
 
 
@@ -463,6 +511,8 @@ def write_research_summary(
     manifest: dict[str, Any],
     trade_examples: dict[str, Any],
     out_path: str | Path,
+    *,
+    leaderboards: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     target = Path(out_path)
     pmxt = manifest.get("evidence_layers", {}).get("international_pmxt_l2", {})
@@ -511,6 +561,26 @@ def write_research_summary(
         "Detailed retained-catalog funnel: [reports/annual_catalog_funnel.md](reports/annual_catalog_funnel.md)",
         "",
     ]
+    category_rows = list((leaderboards or {}).get("category_leaderboard") or [])
+    if category_rows:
+        lines.extend(
+            [
+                "## Best Categories",
+                "",
+                "The ordering uses a transparent blended score: `70%` annual two-cent-slippage profit percentile "
+                "plus `30%` PMXT executable-profit percentile. Dollar profit remains visible beside the score.",
+                "",
+                "| Rank | Category | Score | Annual net profit | PMXT net profit | PMXT evidence |",
+                "|---:|---|---:|---:|---:|---|",
+            ]
+        )
+        for row in category_rows:
+            lines.append(
+                f"| {row['rank']} | `{row['focus_scenario']}` | {row['blended_score']:.2f} "
+                f"| {_money(row['annual_net_profit'])} | {_money(row['pmxt_net_profit'])} "
+                f"| {row['pmxt_validation']} |"
+            )
+        lines.append("")
     if strongest:
         lines.extend(
             [
@@ -534,6 +604,76 @@ def write_research_summary(
         "2. Read [ANNUAL_SCENARIO_ANALYSIS.md](ANNUAL_SCENARIO_ANALYSIS.md) for the international findings.",
         "3. Read [POLYMARKET_US_PUBLIC_CATALOG_ANALYSIS.md](POLYMARKET_US_PUBLIC_CATALOG_ANALYSIS.md) for the separate US catalog study.",
         "4. Read [ARBITRAGE_TRADE_EXAMPLES.md](ARBITRAGE_TRADE_EXAMPLES.md) for worked trade arithmetic.",
+        ]
+    )
+    target.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_matching_audit(payload: dict[str, Any], out_path: str | Path) -> None:
+    target = Path(out_path)
+    meta = payload.get("meta") or {}
+    matches = payload.get("matches") or []
+    rejected = payload.get("rejected") or []
+    accepted_by_category = Counter()
+    for item in matches:
+        text = " ".join(
+            [
+                str(item.get("polymarket", {}).get("title") or ""),
+                str(item.get("kalshi", {}).get("title") or ""),
+                str(item.get("kalshi", {}).get("slug") or ""),
+            ]
+        )
+        accepted_by_category[classify_focus_scenario(text)] += 1
+    rejection_reasons = Counter(str(item.get("reason") or "unspecified") for item in rejected)
+    lines = [
+        "# Matching Audit",
+        "",
+        "Coverage manifest: [coverage_manifest.md](coverage_manifest.md)",
+        "",
+        "## Why The Matcher Was Rebuilt",
+        "",
+        "The earlier matcher required shared literal title words. That discarded valid sports pairs before "
+        "their prices were compared. For example, `Dallas at Milwaukee` and `Mavericks vs. Bucks` describe "
+        "the same NBA game but may share no useful team token.",
+        "",
+        "The rebuilt matcher first converts venue text into structured fields: league, canonical participants, "
+        "selected outcome, actual scheduled start, market type, numeric line, period, and round. It then applies "
+        "hard mismatch vetoes. Plausible finalists are reviewed through cached OpenAI Structured Outputs when "
+        "the research run enables adjudication.",
+        "",
+        "## Current Funnel",
+        "",
+        f"- Kalshi retained rows: `{meta.get('kalshi_catalog_markets', 0)}`",
+        f"- Polymarket retained rows: `{meta.get('polymarket_catalog_markets', 0)}`",
+        f"- Exact accepted pairs: `{len(matches)}`",
+        f"- Rejected finalists: `{len(rejected)}`",
+        f"- Matching gate version: `{meta.get('matching_gate_version', 'unknown')}`",
+        f"- OpenAI adjudication enabled: `{meta.get('openai_adjudication_enabled', False)}`",
+        f"- Recorded OpenAI spend: `${float(meta.get('openai_adjudication_spent_usd') or 0):.6f}`",
+        "",
+        "## Accepted Pairs By Category",
+        "",
+        "| Category | Exact pairs |",
+        "|---|---:|",
+    ]
+    for category, count in accepted_by_category.most_common():
+        lines.append(f"| `{category}` | {count} |")
+    lines.extend(
+        [
+            "",
+            "## Most Common Rejection Reasons",
+            "",
+            "| Reason | Candidates |",
+            "|---|---:|",
+        ]
+    )
+    for reason, count in rejection_reasons.most_common(30):
+        lines.append(f"| {reason} | {count} |")
+    lines.extend(
+        [
+            "",
+            "A rejected near-match is not included in profit totals. This includes same-game contracts with "
+            "different overtime, cancellation, period, threshold, split-payout, or settlement treatment.",
         ]
     )
     target.write_text("\n".join(lines), encoding="utf-8")
@@ -592,8 +732,8 @@ def _trade_examples(
         grouped[scenario].append(
             {
                 "scenario": scenario,
-                "evidence_label": "pmxt_archived_l2_strict_candidate_pending_manual_rule_review",
-                "manual_review_status": "required_before_trade_presentation",
+                "evidence_label": "pmxt_archived_l2_exact_pair",
+                "manual_review_status": "exact-pair gate passed; re-check venue rules before live trading",
                 "match_id": item["match_id"],
                 "timestamp": item["start"],
                 "best_timestamp": item.get("best_timestamp") or item["start"],
@@ -632,6 +772,8 @@ def _trade_examples(
     ):
         if float(item.get("net_edge_per_contract") or 0) <= 0:
             continue
+        if abs(float(item.get("pair_slippage_assumption") or 0) - 0.02) > 1e-9:
+            continue
         if strict_match_rejection(
             item.get("polymarket_title", ""),
             item.get("kalshi_title", ""),
@@ -648,7 +790,7 @@ def _trade_examples(
             {
                 "scenario": scenario,
                 "evidence_label": "official_api_price_history_proxy_without_historical_depth",
-                "manual_review_status": "required_before_trade_presentation",
+                "manual_review_status": "exact-pair gate passed; annual depth remains modeled",
                 "match_id": item["match_id"],
                 "timestamp": item["timestamp"],
                 "best_timestamp": item["timestamp"],
@@ -875,6 +1017,8 @@ def write_scenario_analysis_report(
     l2_result: dict[str, Any] | None,
     annual_result: dict[str, Any] | None,
     out_path: str | Path,
+    *,
+    leaderboards: dict[str, list[dict[str, Any]]] | None = None,
 ) -> None:
     target = Path(out_path)
     scenarios = [*FOCUS_SCENARIOS, ADDITIONAL_DISCOVERED_SECTION]
@@ -997,6 +1141,50 @@ def write_scenario_analysis_report(
         "| Rank | Category | Annual positive proxy rows | PMXT positive 100-contract windows | Best retained net profit per contract |",
         "|---:|---|---:|---:|---:|",
     ]
+    category_rows = list((leaderboards or {}).get("category_leaderboard") or [])
+    subscenario_rows = list((leaderboards or {}).get("subscenario_leaderboard") or [])
+    if category_rows:
+        lines.extend(
+            [
+                "",
+                "## Official Category Ranking",
+                "",
+                "The `blended score` is not dollars. First, each category is ranked by annual modeled portfolio "
+                "profit and converted to a percentile from `0` to `100`. The same is done for executable PMXT "
+                "portfolio profit. The final score is `0.70 × annual percentile + 0.30 × PMXT percentile`. "
+                "A category absent from PMXT receives a neutral PMXT percentile of `50` and is labeled unvalidated.",
+                "",
+                "| Rank | Category | Blended score | Annual percentile | Annual profit | Annual ROI | PMXT percentile | PMXT profit | Validation |",
+                "|---:|---|---:|---:|---:|---:|---:|---:|---|",
+            ]
+        )
+        for row in category_rows:
+            lines.append(
+                f"| {row['rank']} | `{row['focus_scenario']}` | {row['blended_score']:.2f} "
+                f"| {row['annual_profit_percentile']:.2f} | {_money(row['annual_net_profit'])} "
+                f"| {row['annual_roi']:.2%} | {row['pmxt_profit_percentile']:.2f} "
+                f"| {_money(row['pmxt_net_profit'])} | {row['pmxt_validation']} |"
+            )
+    if subscenario_rows:
+        lines.extend(
+            [
+                "",
+                "## Detailed Subscenario Ranking",
+                "",
+                "Each row combines category, competition stage, tournament or session level when applicable, "
+                "market type, and entry timing. This is where NBA playoffs can be compared directly with NBA "
+                "regular season, ATP Grand Slams, MLB postseason markets, and other specific situations.",
+                "",
+                "| Rank | Subscenario | Score | Annual profit | PMXT profit | Validation |",
+                "|---:|---|---:|---:|---:|---|",
+            ]
+        )
+        for row in subscenario_rows[:100]:
+            lines.append(
+                f"| {row['rank']} | `{row['subscenario']}` | {row['blended_score']:.2f} "
+                f"| {_money(row['annual_net_profit'])} | {_money(row['pmxt_net_profit'])} "
+                f"| {row['pmxt_validation']} |"
+            )
     for index, item in enumerate(ranked, start=1):
         lines.append(
             f"| {index} | {_scenario_label(item['scenario'])} | {item['annual']} | {item['l2']} | {_money(item['best'])} |"

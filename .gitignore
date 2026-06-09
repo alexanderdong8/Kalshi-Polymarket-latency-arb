@@ -6,6 +6,8 @@ historical_testing/data/annual_official_*
 historical_testing/data/annual_match_checkpoints/
 historical_testing/data/pmxt_archive_inventory.json
 historical_testing/data/polymarket_us_public_catalog.json
+historical_testing/data/*.pkl
+historical_testing/data/*.pkl.tmp
 live_trading/data/
 
 # Python / virtualenv

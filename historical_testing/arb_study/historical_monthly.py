@@ -14,8 +14,10 @@ from .official_catalog import (
     _month_slices,
     _parse_iso,
     _trim_kalshi_market,
+    _trim_poly_market,
     match_official_catalogs_monthly,
 )
+from .llm_adjudication import OpenAIAdjudicator
 from .serde import read_json, write_json
 
 
@@ -101,8 +103,8 @@ def collect_monthly_cache(
     start: str,
     end: str,
     kalshi_historical_pages: int = 100,
-    kalshi_current_pages_per_month: int = 2,
-    polymarket_pages_per_month: int = 5,
+    kalshi_current_pages_per_month: int = 0,
+    polymarket_pages_per_month: int = 0,
     resume: bool = True,
     retry_truncated: bool = False,
 ) -> dict[str, Any]:
@@ -113,6 +115,13 @@ def collect_monthly_cache(
         else {"version": 1, "kalshi_months": {}, "polymarket_months": {}}
     )
     cache.setdefault("errors", [])
+    partition_root = target.parent / f"{target.stem}_partitions"
+    partition_index_path = partition_root / "index.json"
+    partition_index = (
+        read_json(partition_index_path)
+        if resume and partition_index_path.exists()
+        else {"version": 1, "polymarket_months": {}, "kalshi_months": {}}
+    )
     _compact_kalshi_historical_crawl(cache, target)
     start_dt = _parse_iso(start)
     end_dt = _parse_iso(end)
@@ -129,27 +138,42 @@ def collect_monthly_cache(
     _crawl_kalshi_historical(cache, target, kalshi, start_dt, kalshi_historical_pages)
     for month_start, month_end in _month_slices(start_dt, end_dt):
         key = month_start.strftime("%Y-%m")
+        effective_poly = partition_index["polymarket_months"].get(
+            key,
+            cache["polymarket_months"].get(key, {}),
+        )
         if (
-            key not in cache["polymarket_months"]
-            or cache["polymarket_months"][key].get("error")
-            or (retry_truncated and cache["polymarket_months"][key].get("truncated"))
+            not effective_poly
+            or effective_poly.get("error")
+            or (retry_truncated and effective_poly.get("truncated"))
         ):
             try:
-                month_payload = _fetch_polymarket_month(polymarket, month_start, month_end, polymarket_pages_per_month)
+                month_payload = _fetch_polymarket_month_checkpointed(
+                    polymarket,
+                    month_start,
+                    month_end,
+                    polymarket_pages_per_month,
+                    partition_root / f"polymarket_{key}.json",
+                    resume=resume,
+                )
             except Exception as exc:  # noqa: BLE001
                 month_payload = {"markets": [], "truncated": True, "error": str(exc)}
                 cache["errors"].append({"layer": "polymarket_gamma", "month": key, "error": str(exc)})
-            cache["polymarket_months"][key] = {
+            partition_index["polymarket_months"][key] = {
                 "start": month_start.isoformat(),
                 "end": month_end.isoformat(),
                 **month_payload,
             }
-            write_json(target, cache)
+            write_json(partition_index_path, partition_index)
             print(f"Checkpointed monthly Polymarket catalog {key}", flush=True)
+        effective_kalshi = partition_index["kalshi_months"].get(
+            key,
+            cache["kalshi_months"].get(key, {}),
+        )
         if (
-            key not in cache["kalshi_months"]
-            or cache["kalshi_months"][key].get("error")
-            or (retry_truncated and cache["kalshi_months"][key].get("truncated"))
+            not effective_kalshi
+            or effective_kalshi.get("error")
+            or (retry_truncated and effective_kalshi.get("truncated"))
             or (
                 month_start < historical_cutoff
                 and not cache.get("kalshi_historical_crawl", {}).get("complete", False)
@@ -167,29 +191,32 @@ def collect_monthly_cache(
             except Exception as exc:  # noqa: BLE001
                 month_payload = {"markets": [], "truncated": True, "error": str(exc)}
                 cache["errors"].append({"layer": "kalshi_catalog", "month": key, "error": str(exc)})
-            cache["kalshi_months"][key] = {
+            partition_index["kalshi_months"][key] = {
                 "start": month_start.isoformat(),
                 "end": month_end.isoformat(),
                 **month_payload,
             }
-            write_json(target, cache)
+            write_json(partition_index_path, partition_index)
             print(f"Checkpointed monthly Kalshi catalog {key}", flush=True)
     return cache
 
 
 def write_coverage_report(cache_path: str | Path, out_path: str | Path) -> dict[str, Any]:
     cache = read_json(cache_path)
+    partition_index = _partition_index(cache_path)
+    poly_months = {**cache.get("polymarket_months", {}), **partition_index.get("polymarket_months", {})}
+    kalshi_months = {**cache.get("kalshi_months", {}), **partition_index.get("kalshi_months", {})}
     crawl = cache.get("kalshi_historical_crawl", {})
     rows = []
-    for month in sorted(set(cache.get("polymarket_months", {})) | set(cache.get("kalshi_months", {}))):
-        poly = cache.get("polymarket_months", {}).get(month, {})
-        kalshi = cache.get("kalshi_months", {}).get(month, {})
+    for month in sorted(set(poly_months) | set(kalshi_months)):
+        poly = poly_months.get(month, {})
+        kalshi = kalshi_months.get(month, {})
         rows.append(
             {
                 "month": month,
                 "kalshi_markets": kalshi.get("market_count", len(kalshi.get("markets", []))),
                 "kalshi_truncated": kalshi.get("truncated"),
-                "polymarket_markets": len(poly.get("markets", [])),
+                "polymarket_markets": int(poly.get("market_count") or len(poly.get("markets", []))),
                 "polymarket_truncated": poly.get("truncated"),
             }
         )
@@ -250,16 +277,27 @@ def normalize_monthly_cache(
     start: str,
     end: str,
     min_score: float = 0.78,
+    *,
+    openai_budget_usd: float = 0.0,
+    adjudication_cache_path: str | Path | None = None,
 ) -> dict[str, Any]:
     cache = read_json(cache_path)
+    partition_index = _partition_index(cache_path)
     start_dt = _parse_iso(start)
     end_dt = _parse_iso(end)
-    historical_months = cache.get("kalshi_months") or cache.get("kalshi_historical_months", {})
+    historical_months = {
+        **(cache.get("kalshi_months") or cache.get("kalshi_historical_months", {})),
+        **partition_index.get("kalshi_months", {}),
+    }
+    polymarket_months = {
+        **cache.get("polymarket_months", {}),
+        **partition_index.get("polymarket_months", {}),
+    }
     raw_poly = _dedupe(
         [
             market
-            for month in cache.get("polymarket_months", {}).values()
-            for market in month.get("markets", [])
+            for month in polymarket_months.values()
+            for market in _polymarket_month_markets(month, Path(cache_path).parent)
         ],
         "id",
     )
@@ -278,11 +316,21 @@ def normalize_monthly_cache(
         ],
         "ticker",
     )
+    adjudicator = (
+        OpenAIAdjudicator(
+            adjudication_cache_path or (Path(out_path).parent / "openai_match_adjudications.json"),
+            budget_usd=openai_budget_usd,
+        )
+        if openai_budget_usd > 0
+        else None
+    )
     matches, rejected = match_official_catalogs_monthly(
         raw_kalshi,
         raw_poly,
         min_score=min_score,
         checkpoint_dir=Path(out_path).parent / "annual_match_checkpoints",
+        adjudicator=adjudicator,
+        poly_records_cache_path=Path(out_path).parent / "annual_poly_records_v5.pkl",
     )
     kalshi_scenarios = _catalog_scenario_counts(raw_kalshi)
     polymarket_scenarios = _catalog_scenario_counts(raw_poly)
@@ -300,6 +348,9 @@ def normalize_monthly_cache(
             "polymarket_catalog_focus_scenarios": polymarket_scenarios["focus"],
             "polymarket_catalog_broad_scenarios": polymarket_scenarios["broad"],
             "min_score": min_score,
+            "matching_gate_version": 5,
+            "openai_adjudication_enabled": bool(adjudicator),
+            "openai_adjudication_spent_usd": adjudicator.spent_usd if adjudicator else 0.0,
             "kalshi_historical_months": {
                 key: {
                     "kalshi_markets": month.get("market_count", len(month.get("markets", []))),
@@ -309,14 +360,15 @@ def normalize_monthly_cache(
             },
             "polymarket_months": {
                 key: {
-                    "polymarket_markets": len(month.get("markets", [])),
+                    "polymarket_markets": int(month.get("market_count") or len(month.get("markets", []))),
                     "polymarket_truncated": month.get("truncated", False),
                 }
-                for key, month in sorted(cache.get("polymarket_months", {}).items())
+                for key, month in sorted(polymarket_months.items())
             },
             "note": (
-                "This is a capped, checkpointed official-catalog screen. Catalog title matching is "
-                "conservative but still requires manual resolution-rule review before trading."
+                "This is a checkpointed official-catalog screen using structured event identities. "
+                "Exact-pair acceptance uses deterministic mismatch vetoes and, when enabled, cached "
+                "OpenAI structured adjudication of settlement compatibility."
             ),
         },
         "matches": [asdict(match) for match in matches],
@@ -545,7 +597,8 @@ def _fetch_kalshi_current_month(
     skipped_out_of_scope_markets = 0
     truncated = False
     cursor = None
-    for page in range(max_pages):
+    page = 0
+    while max_pages in {None, 0} or page < max_pages:
         data = client.markets(
             limit=1000,
             cursor=cursor,
@@ -561,7 +614,8 @@ def _fetch_kalshi_current_month(
         cursor = data.get("cursor")
         if not cursor or not rows:
             break
-        if page == max_pages - 1:
+        page += 1
+        if max_pages not in {None, 0} and page == max_pages:
             truncated = True
     return {
         "markets": markets,
@@ -571,6 +625,85 @@ def _fetch_kalshi_current_month(
         "retention_policy": KALSHI_RETENTION_POLICY,
         "truncated": truncated,
     }
+
+
+def _fetch_polymarket_month_checkpointed(
+    client: PolymarketGammaClient,
+    start: datetime,
+    end: datetime,
+    max_pages: int,
+    checkpoint_path: Path,
+    *,
+    resume: bool,
+) -> dict[str, Any]:
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    state = (
+        read_json(checkpoint_path)
+        if resume and checkpoint_path.exists()
+        else {
+            "version": 1,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "cursor": None,
+            "pages": 0,
+            "markets": [],
+            "complete": False,
+        }
+    )
+    if state.get("complete"):
+        return {
+            "markets": [],
+            "market_count": len(state.get("markets") or []),
+            "pages": state.get("pages", 0),
+            "truncated": False,
+            "complete": True,
+            "partition_path": str(checkpoint_path.resolve()),
+        }
+    pages_this_run = 0
+    while max_pages in {0, None} or pages_this_run < max_pages:
+        data = client.market_page(
+            start.isoformat(),
+            end.isoformat(),
+            cursor=state.get("cursor"),
+            limit=100,
+        )
+        rows = list(data.get("markets") or [])
+        state["markets"].extend(_trim_poly_market(item) for item in rows)
+        state["cursor"] = data.get("next_cursor")
+        state["pages"] = int(state.get("pages") or 0) + 1
+        pages_this_run += 1
+        state["complete"] = bool(not rows or not state["cursor"])
+        if state["pages"] % 100 == 0 or state["complete"]:
+            write_json(checkpoint_path, state)
+            print(
+                f"Checkpointed Polymarket {start:%Y-%m} page {state['pages']}; "
+                f"markets={len(state['markets'])}",
+                flush=True,
+            )
+        if state["complete"]:
+            break
+    if not state["complete"]:
+        write_json(checkpoint_path, state)
+    return {
+        "markets": [],
+        "market_count": len(state["markets"]),
+        "pages": state["pages"],
+        "truncated": not state["complete"],
+        "complete": state["complete"],
+        "partition_path": str(checkpoint_path.resolve()),
+    }
+
+
+def _polymarket_month_markets(month: dict[str, Any], cache_parent: Path) -> list[dict[str, Any]]:
+    if month.get("markets"):
+        return list(month["markets"])
+    partition = month.get("partition_path")
+    if not partition:
+        return []
+    path = Path(partition)
+    if not path.is_absolute():
+        path = cache_parent / path
+    return list((read_json(path).get("markets") or [])) if path.exists() else []
 
 
 def _compact_monthly_kalshi_slices(
@@ -590,8 +723,7 @@ def _compact_monthly_kalshi_slices(
         month["source"] = "kalshi_historical_crawl_index"
         changed = True
     if changed:
-        write_json(target, cache)
-        print("Compacted duplicated historical Kalshi monthly row bodies into count-only slices.", flush=True)
+        print("Compacted duplicated historical Kalshi monthly row bodies in memory.", flush=True)
 
 
 def _compact_current_kalshi_slices(
@@ -614,8 +746,13 @@ def _compact_current_kalshi_slices(
         month["retention_policy"] = KALSHI_RETENTION_POLICY
         changed = True
     if changed:
-        write_json(target, cache)
-        print("Compacted current Kalshi monthly row bodies with the research-scope retention filter.", flush=True)
+        print("Compacted current Kalshi monthly row bodies in memory.", flush=True)
+
+
+def _partition_index(cache_path: str | Path) -> dict[str, Any]:
+    target = Path(cache_path)
+    path = target.parent / f"{target.stem}_partitions" / "index.json"
+    return read_json(path) if path.exists() else {"polymarket_months": {}, "kalshi_months": {}}
 
 
 def _in_range(market: dict[str, Any], start: datetime, end: datetime) -> bool:

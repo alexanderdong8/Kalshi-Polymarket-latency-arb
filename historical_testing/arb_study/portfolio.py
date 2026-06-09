@@ -79,5 +79,66 @@ def simulate_portfolio(
     }
 
 
+def simulate_capped_portfolio(
+    opportunities: list[dict[str, Any]],
+    *,
+    rules: PortfolioRules | None = None,
+    enforce_depth: bool,
+) -> dict[str, Any]:
+    """Size each chronological entry up to the per-event cash cap and observed depth."""
+    cfg = rules or PortfolioRules()
+    cash = cfg.starting_bankroll
+    realized_profit = 0.0
+    releases: list[tuple[datetime, float]] = []
+    active_until: dict[str, datetime] = {}
+    positions = []
+    rejected = {"cash": 0, "depth": 0, "already_active": 0, "non_positive": 0}
+    cap = cfg.starting_bankroll * cfg.position_cap_share
+    for item in sorted(opportunities, key=lambda row: row["start"]):
+        start = _parse(item["start"])
+        while releases and releases[0][0] <= start:
+            _, released = heapq.heappop(releases)
+            cash += released
+        match_id = str(item["match_id"])
+        if match_id in active_until and active_until[match_id] > start:
+            rejected["already_active"] += 1
+            continue
+        entry_cost = float(item.get("entry_cost_per_contract") or 0)
+        profit_per_contract = float(item.get("net_profit_per_contract") or 0)
+        if entry_cost <= 0 or profit_per_contract <= 0:
+            rejected["non_positive"] += 1
+            continue
+        max_contracts = int(min(cash, cap) // entry_cost)
+        if enforce_depth:
+            max_contracts = min(max_contracts, int(float(item.get("depth_contracts") or 0)))
+            if max_contracts <= 0:
+                rejected["depth"] += 1
+                continue
+        if max_contracts <= 0:
+            rejected["cash"] += 1
+            continue
+        cost = entry_cost * max_contracts
+        profit = profit_per_contract * max_contracts
+        exit_at = _parse(item.get("paired_exit_at") or item["settlement_at"])
+        cash -= cost
+        realized_profit += profit
+        active_until[match_id] = exit_at
+        heapq.heappush(releases, (exit_at, cost + profit))
+        positions.append({**item, "contracts": max_contracts, "realized_profit": profit})
+    while releases:
+        _, released = heapq.heappop(releases)
+        cash += released
+    return {
+        "starting_bankroll": cfg.starting_bankroll,
+        "ending_bankroll": cash,
+        "realized_profit": realized_profit,
+        "roi": realized_profit / cfg.starting_bankroll if cfg.starting_bankroll else 0.0,
+        "position_cap": cap,
+        "accepted_positions": len(positions),
+        "rejected": rejected,
+        "positions": positions,
+    }
+
+
 def _parse(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))

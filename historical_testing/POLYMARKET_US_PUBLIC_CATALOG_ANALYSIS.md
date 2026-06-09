@@ -41,25 +41,26 @@ Polymarket US exposes a public catalog that is useful for understanding which ca
 
 | Scenario | Events | Embedded markets |
 |---|---:|---:|
-| `mlb` | 990 | 17536 |
-| `additional_discovered_scenario_coverage` | 5321 | 6203 |
-| `golf` | 35 | 3881 |
-| `nba` | 1271 | 3567 |
-| `atp` | 2713 | 2824 |
-| `nhl` | 987 | 2654 |
-| `wta` | 1232 | 1324 |
-| `weather` | 189 | 1116 |
-| `itf_men` | 878 | 878 |
-| `itf_women` | 755 | 755 |
-| `mls` | 230 | 660 |
-| `ipl` | 52 | 617 |
-| `esports` | 199 | 464 |
+| `mlb` | 990 | 17537 |
+| `additional_discovered_scenario_coverage` | 5325 | 6336 |
+| `golf` | 35 | 3913 |
+| `nba` | 1245 | 3531 |
+| `atp` | 2726 | 2812 |
+| `nhl` | 987 | 2804 |
+| `wta` | 1237 | 1329 |
+| `weather` | 185 | 1097 |
+| `itf_men` | 879 | 879 |
+| `itf_women` | 759 | 759 |
+| `mls` | 230 | 690 |
+| `esports` | 199 | 410 |
 | `fifa_world_cup` | 0 | 362 |
-| `ufc` | 292 | 288 |
+| `culture` | 26 | 338 |
+| `ufc` | 295 | 291 |
 | `wnba` | 73 | 73 |
-| `elections` | 15 | 47 |
+| `ipl` | 52 | 52 |
+| `elections` | 13 | 44 |
 | `f1` | 2 | 33 |
-| `culture` | 26 | 12 |
+| `politics` | 2 | 4 |
 
 ## Market Types
 

@@ -165,8 +165,9 @@ def main() -> None:
     research.add_argument("--skip-pmxt-replay", action="store_true")
     research.add_argument("--skip-us-catalog", action="store_true")
     research.add_argument("--kalshi-historical-pages", type=int, default=500)
-    research.add_argument("--polymarket-pages-per-month", type=int, default=100)
-    research.add_argument("--annual-proxy-markets-per-month", type=int, default=25)
+    research.add_argument("--polymarket-pages-per-month", type=int, default=0)
+    research.add_argument("--annual-proxy-markets-per-month", type=int, default=0)
+    research.add_argument("--openai-budget-usd", type=float, default=7.0)
     research.add_argument("--max-pmxt-hours", type=int, default=None)
     research.add_argument("--max-us-pages", type=int, default=None)
     research.add_argument("--terminal-summary-limit", type=int, default=100)
@@ -475,6 +476,7 @@ def run_public_us_catalog(args: argparse.Namespace) -> None:
         resume=not args.fresh,
         max_pages=args.max_pages,
         terminal_summary_limit=args.terminal_summary_limit,
+        openai_budget_usd=args.openai_budget_usd,
     )
     result = summarize_public_us_catalog(cache)
     write_json(args.out_json, result)
@@ -538,7 +540,13 @@ def run_render_research_reports(args: argparse.Namespace) -> None:
 
 
 def run_normalize_annual_cache(args: argparse.Namespace) -> None:
-    result = normalize_monthly_cache(args.cache, args.out, args.start, args.end, min_score=args.min_score)
+    result = normalize_monthly_cache(
+        args.cache,
+        args.out,
+        args.start,
+        args.end,
+        min_score=args.min_score,
+    )
     print(
         f"Rebuilt annual strict match index with {result['meta']['matched_pairs']} pairs; "
         f"wrote {args.out}"
