@@ -1,6 +1,8 @@
-# Live Matched-Market Scanner
+# Live Multi-Outcome Trading Engine
 
-This is the read-only live scanner for the Kalshi / Polymarket US arbitrage idea.
+This package contains the Kalshi / Polymarket US monitor, paper trader, and
+capital-limited live engine. The earlier broad matched-market scanner remains
+available through the discovery-oriented CLI flags.
 
 The goal is to find active markets on both venues that appear to resolve on the same event, keep their order books hot with streaming market data, and show when the executable YES/NO basket costs less than `$1.00`.
 
@@ -24,7 +26,9 @@ Arb basket:
 
 If the two contracts are truly identical, one leg should pay `$1.00` at resolution. The scanner reports that gross edge, then subtracts estimated fees and a slippage buffer to estimate a net edge.
 
-This package does not place, cancel, or modify orders. It is designed to prove the data path, matching quality, and opportunity frequency before execution code is added.
+Manifest-driven paper mode simulates orders without changing public books.
+Live mode can place and cancel orders only after manifest review, balance and
+position preview, a capital limit, and exact startup confirmation.
 
 ## Project Status At A Glance
 
@@ -33,7 +37,8 @@ This repository currently has two related packages:
 | Package | Purpose | Status |
 | --- | --- | --- |
 | `historical_testing/` | Replay historical Kalshi / Polymarket data and estimate whether cross-venue dislocations existed in the past. | Research tooling already exists. |
-| `live_trading/` | Discover overlapping Kalshi / Polymarket US markets, consume live books, identify live candidates, record data, and measure local performance. | Implemented as a read-only scanner. |
+| `live_trading/` | Monitor, paper trade, or explicitly enable live trading for a reviewed multi-outcome event. | Implemented with guarded live adapters. |
+| `backtesting/` | Replay PMXT Kalshi and international Polymarket L2 with virtual time. | Implemented as a simulator, not an optimizer. |
 
 The live package has working authenticated API connectivity to both venues, a local terminal UI, bounded data recording, and a synthetic benchmark harness. It does **not** yet execute trades or simulate order fills.
 

@@ -9,6 +9,7 @@ historical_testing/data/polymarket_us_public_catalog.json
 historical_testing/data/*.pkl
 historical_testing/data/*.pkl.tmp
 live_trading/data/
+backtesting/runs/
 
 # Python / virtualenv
 __pycache__/

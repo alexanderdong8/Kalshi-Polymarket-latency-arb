@@ -5,9 +5,10 @@ This repository investigates whether equivalent prediction-market contracts can 
 The project has two complementary parts:
 
 1. **Historical research** asks whether these opportunities appeared in past order books often enough to justify further work.
-2. **Live scanning infrastructure** watches active Kalshi and Polymarket US markets in real time, matches contracts that appear to resolve on the same event, and surfaces current arbitrage candidates.
+2. **Live trading infrastructure** monitors manually reviewed Kalshi and Polymarket US events and supports read-only, paper, and explicitly confirmed live modes.
+3. **Deterministic backtesting** replays PMXT Kalshi and international Polymarket L2 data through the shared multi-outcome strategy.
 
-The repository does **not** currently place live trades. The live system is intentionally read-only while the project validates market matching, fee assumptions, data freshness, opportunity duration, and local performance.
+Live order code is present but remains guarded by reviewed manifests, a per-run capital limit, a startup preview, and an exact `LIVE` confirmation. Automated tests mock execution and never submit real orders.
 
 ## The Core Idea
 
@@ -53,7 +54,9 @@ The real-world strategy also has to account for:
 prediction_markets_arb/
   README.md                  Repository-level orientation
   historical_testing/        Historical order-book research and reports
-  live_trading/              Read-only live scanner and local benchmarks
+  live_trading/              Monitor, paper, and live multi-outcome engine
+  backtesting/               PMXT virtual-clock strategy replay
+  docs/                      Architecture and operating decisions
 ```
 
 ### `historical_testing/`
@@ -70,7 +73,8 @@ Read next: [historical_testing/README.md](historical_testing/README.md)
 
 ### `live_trading/`
 
-Despite the folder name, the current live package is a **read-only scanner**, not a trading bot.
+The live package retains the broad read-only scanner and adds a manifest-driven
+multi-outcome application for monitor, paper, and live execution.
 
 It:
 
@@ -208,4 +212,3 @@ For a new contributor:
 3. Improve historical analysis and document findings.
 4. Add paper-trading fill simulation.
 5. Design live execution separately, with strict risk controls, maximum unhedged exposure, kill switches, and careful legal/API review.
-

@@ -48,10 +48,11 @@ def check(name, cond):
     else:
         FAIL += 1
         print(f"  FAIL: {name}")
+    assert cond, name
 
 
 # ---------------------------------------------------------------- Test 1
-def test_legbidtracker():
+def check_legbidtracker():
     print("=== Test 1: LegBidTracker.is_stable ===")
     t = LegBidTracker(venue="kalshi", outcome_name="A")
     t.configure_window(3)
@@ -106,7 +107,7 @@ class PartialFillClient:
 
 
 # ---------------------------------------------------------------- Test 4
-async def test_abort_flow():
+async def check_abort_flow():
     print("=== Test 4: manual abort flow ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -165,7 +166,7 @@ def make_open_basket(store_size=Decimal("100"), buy_price=Decimal("0.45")):
 
 
 # ---------------------------------------------------------------- Test 3
-async def test_coupling_filter():
+async def check_coupling_filter():
     print("=== Test 3: coupling filter ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -210,7 +211,7 @@ async def test_coupling_filter():
 
 
 # ---------------------------------------------------------------- Test 2
-async def test_profitability():
+async def check_profitability():
     print("=== Test 2: exit profitability ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -263,7 +264,7 @@ async def test_profitability():
 
 
 # ---------------------------------------------------------------- Test 5
-async def test_full_exit_cycle():
+async def check_full_exit_cycle():
     print("=== Test 5: full exit cycle (post → fill) ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -308,7 +309,7 @@ async def test_full_exit_cycle():
 
 
 # ---------------------------------------------------------------- Test 6
-async def test_partial_escalation():
+async def check_partial_escalation():
     print("=== Test 6: partial fill → escalate to crossing → flat ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -345,7 +346,7 @@ async def test_partial_escalation():
 
 
 # ---------------------------------------------------------------- Test 7
-async def test_revert_when_unsellable():
+async def check_revert_when_unsellable():
     print("=== Test 7: partial, a leg has no bid → revert (buy back) → hold ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -389,7 +390,7 @@ async def test_revert_when_unsellable():
 
 
 # ---------------------------------------------------------------- Test 8
-async def test_depth_cap_sizes_subbasket():
+async def check_depth_cap_sizes_subbasket():
     print("=== Test 8: depth cap sizes a uniform sub-basket ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -421,7 +422,7 @@ async def test_depth_cap_sizes_subbasket():
 
 
 # ---------------------------------------------------------------- Test 9
-async def test_repeg_follows_touch():
+async def check_repeg_follows_touch():
     print("=== Test 9: re-peg follows the touch down (margin-bounded) ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -462,7 +463,7 @@ async def test_repeg_follows_touch():
 
 
 # ---------------------------------------------------------------- Test 10
-async def test_thin_depth_blocks():
+async def check_thin_depth_blocks():
     print("=== Test 10: bid depth too thin → blocked, nothing posted ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -489,7 +490,7 @@ async def test_thin_depth_blocks():
 
 
 # ---------------------------------------------------------------- Test 11
-def test_observed_tick():
+def check_observed_tick():
     from trade_system.execution.exit_monitor import _observed_tick
     print("=== Test 11: _observed_tick infers grid from book, falls back if shallow ===")
     fb = Decimal("0.01")
@@ -507,7 +508,7 @@ def test_observed_tick():
 
 
 # ---------------------------------------------------------------- Test 12
-async def test_half_cent_exit_repeg():
+async def check_half_cent_exit_repeg():
     print("=== Test 12: half-cent observed tick → exit posts at best_bid + 0.005 ===")
     store = BookStore()
     fee_cfg = FeeConfig()
@@ -544,7 +545,7 @@ async def test_half_cent_exit_repeg():
 
 
 # ---------------------------------------------------------------- Test 13
-async def test_pnl_snapshot_math():
+async def check_pnl_snapshot_math():
     print("=== Test 13: PnLTracker snapshot computes cost_basis, MTM, unrealized ===")
     from trade_system.pnl import PnLTracker, RealizedPnLAccumulator
     store = BookStore()
@@ -572,7 +573,7 @@ async def test_pnl_snapshot_math():
 
 
 # ---------------------------------------------------------------- Test 14
-async def test_realized_pnl_accumulator():
+async def check_realized_pnl_accumulator():
     print("=== Test 14: RealizedPnLAccumulator credits only on close, dedups ===")
     from trade_system.pnl import RealizedPnLAccumulator
 
@@ -610,22 +611,27 @@ async def test_realized_pnl_accumulator():
 
 
 async def main():
-    test_legbidtracker()
-    await test_abort_flow()
-    await test_coupling_filter()
-    await test_profitability()
-    await test_full_exit_cycle()
-    await test_partial_escalation()
-    await test_revert_when_unsellable()
-    await test_depth_cap_sizes_subbasket()
-    await test_repeg_follows_touch()
-    await test_thin_depth_blocks()
-    test_observed_tick()
-    await test_half_cent_exit_repeg()
-    await test_pnl_snapshot_math()
-    await test_realized_pnl_accumulator()
+    check_legbidtracker()
+    await check_abort_flow()
+    await check_coupling_filter()
+    await check_profitability()
+    await check_full_exit_cycle()
+    await check_partial_escalation()
+    await check_revert_when_unsellable()
+    await check_depth_cap_sizes_subbasket()
+    await check_repeg_follows_touch()
+    await check_thin_depth_blocks()
+    check_observed_tick()
+    await check_half_cent_exit_repeg()
+    await check_pnl_snapshot_math()
+    await check_realized_pnl_accumulator()
     print(f"\n==== {PASS} passed, {FAIL} failed ====")
+
+
+def test_trade_system_strategy_checks():
+    asyncio.run(main())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
     sys.exit(1 if FAIL else 0)
-
-
-asyncio.run(main())

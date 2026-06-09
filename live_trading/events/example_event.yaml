@@ -1,0 +1,30 @@
+event:
+  name: "Example Three Outcome Event"
+  description: "Replace every identifier and review the settlement rules before use."
+  outcomes:
+    - name: "Outcome A"
+      kalshi_ticker: "KXEXAMPLE-A"
+      polymarket_us_slug: "example-outcome-a"
+      polymarket_contract_address: "0xinternational-contract-a"
+      polymarket_yes_token_id: "international-yes-token-a"
+    - name: "Outcome B"
+      kalshi_ticker: "KXEXAMPLE-B"
+      polymarket_us_slug: "example-outcome-b"
+      polymarket_contract_address: "0xinternational-contract-b"
+      polymarket_yes_token_id: "international-yes-token-b"
+    - name: "Outcome C"
+      kalshi_ticker: "KXEXAMPLE-C"
+      polymarket_us_slug: "example-outcome-c"
+      polymarket_contract_address: "0xinternational-contract-c"
+      polymarket_yes_token_id: "international-yes-token-c"
+
+review:
+  approved: false
+  exhaustive: false
+  settlement_reviewed: false
+
+historical:
+  target_size: 100
+  archive:
+    hours:
+      - "2026-01-01T12"

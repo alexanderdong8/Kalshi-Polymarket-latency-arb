@@ -219,3 +219,37 @@ def test_openai_adjudication_cache_avoids_repeat_request(tmp_path, monkeypatch) 
     assert adjudicator.adjudicate_many([candidate])[0].decision == "exact_locked_pair"
     assert len(calls) == 1
     assert adjudicator.spent_usd > 0
+
+
+def test_openai_adjudication_parallel_batches_preserve_candidate_order(tmp_path, monkeypatch) -> None:
+    adjudicator = OpenAIAdjudicator(tmp_path / "cache.json", api_key="test", budget_usd=7)
+
+    def fake_request(candidates):
+        return (
+            [
+                Adjudication(
+                    "exact_locked_pair", 0.99, True, True, True, True, True,
+                    True, True, str(candidate["id"]), "same rules",
+                )
+                for candidate in candidates
+            ],
+            {"input_tokens": 100 * len(candidates), "output_tokens": 50 * len(candidates)},
+        )
+
+    monkeypatch.setattr(adjudicator, "_request", fake_request)
+    candidates = [{"id": index} for index in range(25)]
+    results = adjudicator.adjudicate_many(candidates)
+    assert [item.orientation for item in results] == [str(index) for index in range(25)]
+    assert len(adjudicator.cache["calls"]) == 3
+
+
+def test_openai_budget_exhaustion_returns_uncertain_without_request(tmp_path, monkeypatch) -> None:
+    adjudicator = OpenAIAdjudicator(tmp_path / "cache.json", api_key="test", budget_usd=0.005)
+    monkeypatch.setattr(
+        adjudicator,
+        "_request",
+        lambda candidates: pytest.fail("request should not run when one reserved batch exceeds budget"),
+    )
+    result = adjudicator.adjudicate_many([{"id": 1}])[0]
+    assert result.decision == "uncertain"
+    assert result.source == "budget_exhausted"

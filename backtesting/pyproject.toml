@@ -3,27 +3,26 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "live-trading"
+name = "prediction-market-backtesting"
 version = "0.1.0"
-description = "Multi-outcome Kalshi / Polymarket US monitor, paper trader, and live trader"
+description = "Deterministic PMXT replay for the live multi-outcome basket strategy"
 requires-python = ">=3.10"
 dependencies = [
-  "aiohttp>=3.9",
-  "cryptography>=42.0",
-  "python-dotenv>=1.0",
-  "psutil>=5.9",
+  "fsspec>=2024.0",
   "nicegui>=2.0",
-  "plotly>=5.20",
+  "openai>=1.50",
+  "pandas>=2.0",
+  "pyarrow>=14.0",
   "pyyaml>=6.0",
-  "rich>=13.7",
-  "websockets>=14.0",
+  "plotly>=5.20",
+  "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 
 [project.scripts]
-live-trading = "live_trading.main:main"
+backtesting = "backtesting.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

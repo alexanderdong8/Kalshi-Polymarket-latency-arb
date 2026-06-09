@@ -13,4 +13,3 @@ def test_polymarket_us_taker_fee_uses_bankers_rounding() -> None:
     assert bankers_round_cent(Decimal("0.025")) == Decimal("0.02")
     assert bankers_round_cent(Decimal("0.035")) == Decimal("0.04")
     assert round_up_cent(Decimal("0.021")) == Decimal("0.03")
-

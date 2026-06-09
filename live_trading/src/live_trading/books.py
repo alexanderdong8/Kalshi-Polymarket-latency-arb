@@ -134,7 +134,10 @@ class KalshiOrderBook:
         best_no_bid = _best(no_bids)
         yes_ask = ONE - best_no_bid.price if best_no_bid else None
         no_ask = ONE - best_yes_bid.price if best_yes_bid else None
-        yes_asks = (PriceLevel(yes_ask, best_no_bid.size),) if yes_ask is not None and best_no_bid else ()
+        yes_asks = tuple(
+            PriceLevel(ONE - level.price, level.size)
+            for level in no_bids
+        )
         return BookState(
             venue="kalshi",
             market_key=self.market_key,

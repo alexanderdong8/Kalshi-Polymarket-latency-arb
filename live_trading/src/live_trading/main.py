@@ -5,6 +5,7 @@ import asyncio
 from contextlib import suppress
 from dataclasses import asdict
 from decimal import Decimal
+from pathlib import Path
 from pprint import pprint
 
 from .arb import evaluate_match
@@ -20,6 +21,8 @@ from .storage import SegmentedRecorder
 from .tui import Dashboard
 from .venues.kalshi import KalshiClient
 from .venues.polymarket_us import PolymarketUSClient
+from .runtime import RuntimeOptions, run_manifest_runtime
+from .strategy_benchmark import benchmark_strategy_and_dashboard
 
 
 def main() -> None:
@@ -30,7 +33,12 @@ def main() -> None:
     discover.add_argument("--categories", default="sports,politics,crypto,economics")
     discover.add_argument("--max-matches", type=int, default=None)
 
-    run = sub.add_parser("run", help="Run live streaming dashboard")
+    run = sub.add_parser("run", help="Run manifest-driven monitor, paper, or live trading")
+    run.add_argument("--mode", choices=("monitor", "paper", "live"), default=None)
+    run.add_argument("--config", default=None, help="Reviewed multi-outcome event YAML")
+    run.add_argument("--capital", type=Decimal, default=Decimal("0"))
+    run.add_argument("--dashboard", action=argparse.BooleanOptionalAction, default=True)
+    run.add_argument("--dashboard-port", type=int, default=8080)
     run.add_argument("--categories", default="sports,politics,crypto,economics")
     run.add_argument("--max-matches", type=int, default=None)
     run.add_argument("--metrics-out", default=None)
@@ -40,6 +48,11 @@ def main() -> None:
     benchmark.add_argument("--duration-seconds", type=float, default=60.0)
     benchmark.add_argument("--profiles", default="steady,burst,stress")
     benchmark.add_argument("--out", default="live_trading/data/benchmarks/latest.json")
+    strategy_benchmark = sub.add_parser(
+        "strategy-benchmark",
+        help="Benchmark strategy evaluation separately from dashboard serialization",
+    )
+    strategy_benchmark.add_argument("--iterations", type=int, default=10_000)
 
     doctor = sub.add_parser("doctor", help="Validate configured venue APIs without placing orders")
     doctor.add_argument("--categories", default="sports")
@@ -54,6 +67,8 @@ def main() -> None:
         asyncio.run(run_live(args))
     elif args.command == "benchmark":
         asyncio.run(run_benchmark(args))
+    elif args.command == "strategy-benchmark":
+        pprint(benchmark_strategy_and_dashboard(args.iterations))
     elif args.command == "doctor":
         asyncio.run(run_doctor(args))
     elif args.command == "sample-tui":
@@ -78,6 +93,19 @@ async def run_discover(args: argparse.Namespace) -> None:
 
 
 async def run_live(args: argparse.Namespace) -> None:
+    if args.config:
+        if args.mode is None:
+            raise ValueError("--mode is required when --config is supplied.")
+        await run_manifest_runtime(
+            RuntimeOptions(
+                mode=args.mode,
+                config=Path(args.config),
+                capital=args.capital,
+                dashboard=args.dashboard,
+                dashboard_port=args.dashboard_port,
+            )
+        )
+        return
     settings = Settings.from_env()
     categories = _parse_categories(args.categories)
     store = BookStore(stale_after_seconds=settings.stale_after_seconds)

@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,8 @@ MODEL = "gpt-4o-mini"
 PROMPT_VERSION = 1
 INPUT_USD_PER_MILLION = 0.15
 OUTPUT_USD_PER_MILLION = 0.60
+MAX_PARALLEL_REQUESTS = 4
+RESERVED_USD_PER_BATCH = 0.01
 
 
 @dataclass(frozen=True)
@@ -73,24 +76,43 @@ class OpenAIAdjudicator:
                 results[key] = Adjudication(**cached)
             else:
                 missing.append((key, candidate))
-        for offset in range(0, len(missing), batch_size):
-            batch = missing[offset : offset + batch_size]
-            if self.spent_usd >= self.budget_usd:
+        batches = [
+            missing[offset : offset + batch_size]
+            for offset in range(0, len(missing), batch_size)
+        ]
+        next_batch = 0
+        while next_batch < len(batches):
+            remaining_budget = self.budget_usd - self.spent_usd
+            affordable = int(remaining_budget // RESERVED_USD_PER_BATCH)
+            request_count = min(MAX_PARALLEL_REQUESTS, affordable, len(batches) - next_batch)
+            if request_count <= 0:
                 break
-            returned, usage = self._request([candidate for _, candidate in batch])
-            cost = _usage_cost(usage)
-            if self.spent_usd + cost > self.budget_usd + 1e-9:
+            group = batches[next_batch : next_batch + request_count]
+            next_batch += request_count
+            completed = []
+            with ThreadPoolExecutor(max_workers=request_count) as executor:
+                future_map = {
+                    executor.submit(self._request, [candidate for _, candidate in batch]): batch
+                    for batch in group
+                }
+                for future in as_completed(future_map):
+                    returned, usage = future.result()
+                    completed.append((future_map[future], returned, usage))
+            group_cost = sum(_usage_cost(usage) for _, _, usage in completed)
+            if self.spent_usd + group_cost > self.budget_usd + 1e-9:
                 raise RuntimeError(
                     f"OpenAI adjudication would exceed ${self.budget_usd:.2f} hard cap."
                 )
-            self.cache["spent_usd"] = self.spent_usd + cost
-            self.cache["calls"].append(
-                {"model": self.model, "items": len(batch), "usage": usage, "cost_usd": cost}
-            )
-            for (key, _), item in zip(batch, returned):
-                results[key] = item
-                self.cache["items"][key] = asdict(item)
-            write_json(self.cache_path, self.cache)
+            for batch, returned, usage in completed:
+                cost = _usage_cost(usage)
+                self.cache["spent_usd"] = self.spent_usd + cost
+                self.cache["calls"].append(
+                    {"model": self.model, "items": len(batch), "usage": usage, "cost_usd": cost}
+                )
+                for (key, _), item in zip(batch, returned):
+                    results[key] = item
+                    self.cache["items"][key] = asdict(item)
+                write_json(self.cache_path, self.cache)
         output = []
         for candidate in candidates:
             key = _cache_key(candidate, self.model)
@@ -121,6 +143,7 @@ class OpenAIAdjudicator:
         request_json = {
                 "model": self.model,
                 "temperature": 0,
+                "max_output_tokens": 5000,
                 "input": [
                     {
                         "role": "system",
