@@ -131,6 +131,93 @@ def test_structured_gate_rejects_wrong_opponent_and_line() -> None:
     assert not compatible_candidate(spread_left, spread_right)
 
 
+@pytest.mark.parametrize(
+    ("kalshi_title", "yes", "ticker", "poly_title"),
+    [
+        (
+            "F1 Canadian Grand Prix Winner?",
+            "Fernando Alonso",
+            "KXF1RACE-CAGP25-ALO",
+            "Will Fernando Alonso win the 2025 Spanish Grand Prix?",
+        ),
+        (
+            "Azerbaijan Grand Prix 2025 Winner?",
+            "Oliver Bearman",
+            "KXF1RACE-AZEGP25-BEA",
+            "Will Oliver Bearman win the 2025 F1 Dutch Grand Prix pole?",
+        ),
+        (
+            "Qatar Grand Prix: Qualify in Pole Position",
+            "Lewis Hamilton",
+            "KXF1POLEPOSITION-QATGP25-HAM",
+            "Will Lewis Hamilton achieve pole position in Sprint Qualifying at the 2025 F1 Qatar Grand Prix?",
+        ),
+        (
+            "Qatar Grand Prix: Fastest Lap",
+            "Lando Norris",
+            "KXF1FASTESTLAP-QATGP25-NOR",
+            "Will Lando Norris finish on the podium at the 2025 F1 Brazilian Grand Prix?",
+        ),
+        (
+            "Will Charles Howell III win the LIV Golf Dallas?",
+            "Charles Howell III",
+            "KXLIVTOUR-DAL25-CHOW",
+            "Will Charles Howell III win the 2025 LIV Golf UK tournament?",
+        ),
+        (
+            "Payton Pritchard: Double Double",
+            "Payton Pritchard",
+            "KXNBA2D-PRITCHARD",
+            "Will Payton Pritchard lead the NBA in three pointers made during the season?",
+        ),
+        (
+            "Truist Championship: Will Kristoffer Reitan finish top 20?",
+            "Kristoffer Reitan",
+            "KXPGATOP20-REITAN",
+            "Will Kristoffer Reitan win the 2026 PGA Championship?",
+        ),
+    ],
+)
+def test_deterministic_sports_gate_rejects_same_participant_different_contracts(
+    kalshi_title: str,
+    yes: str,
+    ticker: str,
+    poly_title: str,
+) -> None:
+    matches, _ = match_official_catalogs(
+        [_kalshi(kalshi_title, yes, ticker)],
+        [
+            _poly(
+                poly_title,
+                ["Yes", "No"],
+                ticker.lower(),
+                "2026-01-02T00:00:00Z",
+                "2026-01-02T03:00:00Z",
+                groupItemTitle=yes,
+            )
+        ],
+    )
+    assert matches == []
+
+
+def test_f1_same_race_winner_pair_remains_eligible() -> None:
+    matches, rejected = match_official_catalogs(
+        [_kalshi("F1 Canadian Grand Prix Winner?", "Esteban Ocon", "KXF1RACE-CAGP25-OCO")],
+        [
+            _poly(
+                "Will Esteban Ocon win the 2025 Canadian Grand Prix?",
+                ["Yes", "No"],
+                "canadian-gp-ocon",
+                "2026-01-02T00:00:00Z",
+                "2026-01-02T03:00:00Z",
+                groupItemTitle="Esteban Ocon",
+            )
+        ],
+    )
+    assert rejected == []
+    assert len(matches) == 1
+
+
 def test_granular_sports_taxonomy() -> None:
     assert classify_competition_phase("NBA play-in game") == "play_in"
     assert classify_competition_phase("MLB ALDS game") == "division_series"

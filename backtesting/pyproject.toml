@@ -9,7 +9,7 @@ description = "Deterministic PMXT replay for the live multi-outcome basket strat
 requires-python = ">=3.10"
 dependencies = [
   "fsspec>=2024.0",
-  "nicegui>=2.0",
+  "nicegui>=2.0,<3",
   "openai>=1.50",
   "pandas>=2.0",
   "pyarrow>=14.0",

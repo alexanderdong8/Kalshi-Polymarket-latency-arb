@@ -31,7 +31,7 @@ from .strict_matching import (
 
 
 CACHE_VERSION = 3
-MATCHING_GATE_VERSION = 6
+MATCHING_GATE_VERSION = 7
 POLY_RECORD_CACHE_VERSION = 5
 STOP_WORDS = {
     "a",
@@ -840,6 +840,8 @@ def _score_sports_pair(kalshi: dict[str, Any], poly: dict[str, Any]) -> dict[str
     right: SportsIdentity = poly["identity"]
     if not compatible_candidate(left, right):
         return None
+    if _sports_contract_rejection(kalshi, poly):
+        return None
     oriented = _orient_poly_outcomes(poly, kalshi["yes_label"])
     if not oriented:
         return None
@@ -873,7 +875,7 @@ def _deterministic_pair_rejection(kalshi: dict[str, Any], poly: dict[str, Any]) 
             return "structured sports identity mismatch"
         if left.outcome and right.participants and left.outcome not in right.participants:
             return "selected outcome is not a participant in the Polymarket event"
-        return None
+        return _sports_contract_rejection(kalshi, poly)
     if strict_match_rejection(kalshi["question_title"], poly["question_title"]):
         return strict_match_rejection(kalshi["question_title"], poly["question_title"])
     if strict_outcome_label_rejection(poly["question_title"], kalshi["yes_label"]):
@@ -903,6 +905,140 @@ def _identity_payload(identity: SportsIdentity) -> dict[str, Any]:
         "period": identity.period,
         "round_name": identity.round_name,
     }
+
+
+F1_EVENT_NAMES = {
+    "abu dhabi": "abu dhabi grand prix",
+    "australian": "australian grand prix",
+    "austrian": "austrian grand prix",
+    "azerbaijan": "azerbaijan grand prix",
+    "bahrain": "bahrain grand prix",
+    "belgian": "belgian grand prix",
+    "brazilian": "sao paulo grand prix",
+    "british": "british grand prix",
+    "canadian": "canadian grand prix",
+    "chinese": "chinese grand prix",
+    "dutch": "dutch grand prix",
+    "emilia romagna": "emilia romagna grand prix",
+    "hungarian": "hungarian grand prix",
+    "italian": "italian grand prix",
+    "japanese": "japanese grand prix",
+    "las vegas": "las vegas grand prix",
+    "mexico city": "mexico city grand prix",
+    "miami": "miami grand prix",
+    "monaco": "monaco grand prix",
+    "qatar": "qatar grand prix",
+    "sao paulo": "sao paulo grand prix",
+    "saudi arabian": "saudi arabian grand prix",
+    "singapore": "singapore grand prix",
+    "spanish": "spanish grand prix",
+    "united states": "united states grand prix",
+}
+GOLF_EVENT_NAMES = (
+    "liv golf adelaide",
+    "liv golf andalucia",
+    "liv golf chicago",
+    "liv golf dallas",
+    "liv golf dc",
+    "liv golf indianapolis",
+    "liv golf miami",
+    "liv golf uk",
+    "masters tournament",
+    "pga championship",
+    "players championship",
+    "the open championship",
+    "truist championship",
+    "u s open",
+)
+
+
+def _sports_contract_rejection(kalshi: dict[str, Any], poly: dict[str, Any]) -> str | None:
+    title_rejection = strict_match_rejection(kalshi["question_title"], poly["question_title"])
+    if title_rejection:
+        return title_rejection
+    left_competition = _sports_competition_key(kalshi)
+    right_competition = _sports_competition_key(poly)
+    if left_competition and right_competition and left_competition != right_competition:
+        return "sports competition identity mismatch"
+    left_variant = _sports_contract_variant(kalshi)
+    right_variant = _sports_contract_variant(poly)
+    if left_variant != right_variant:
+        return "sports contract variant mismatch"
+    return None
+
+
+def _sports_competition_key(record: dict[str, Any]) -> str | None:
+    identity: SportsIdentity = record["identity"]
+    normalized = _norm(record["semantic_text"])
+    if identity.league == "f1":
+        for event, canonical in F1_EVENT_NAMES.items():
+            if f"{event} grand prix" in normalized:
+                return canonical
+    if identity.league == "golf":
+        for event in GOLF_EVENT_NAMES:
+            if event in normalized:
+                return event
+    return None
+
+
+def _sports_contract_variant(record: dict[str, Any]) -> str:
+    identity: SportsIdentity = record["identity"]
+    normalized = _norm(
+        " ".join(
+            filter(
+                None,
+                [
+                    record["question_title"],
+                    record["raw"].get("yes_sub_title"),
+                    record["raw"].get("groupItemTitle"),
+                ],
+            )
+        )
+    )
+    if "double double" in normalized:
+        return "single_game_double_double"
+    if re.search(r"\blead (?:the )?(?:nba|wnba|mlb|nhl)\b", normalized):
+        stat = next(
+            (
+                label
+                for label in (
+                    "three pointers",
+                    "blocks",
+                    "points",
+                    "rebounds",
+                    "assists",
+                    "goals",
+                    "home runs",
+                )
+                if label in normalized
+            ),
+            "unspecified_stat",
+        )
+        return f"season_stat_leader:{stat}"
+    placement = re.search(r"\b(?:finish|finishes) top (\d+)\b", normalized)
+    if placement:
+        return f"placement_top_{placement.group(1)}"
+    if "make the cut" in normalized:
+        return "make_cut"
+    if identity.league == "golf" and "playoff" in normalized and not identity.participants:
+        return "playoff_occurs"
+    if identity.league == "f1":
+        if "sprint" in normalized and ("pole" in normalized or "qualifying" in normalized):
+            return "sprint_qualifying_pole"
+        if "fastest lap" in normalized:
+            return "fastest_lap"
+        if "podium" in normalized:
+            return "podium_finish"
+        if "pole" in normalized:
+            return "qualifying_pole"
+        if "qualifying" in normalized:
+            return "qualifying"
+        if "sprint" in normalized:
+            return "sprint"
+        if "practice" in normalized:
+            return "practice"
+        return "race_winner"
+    return identity.market_type
 
 
 def _match_reasoning(score: dict[str, Any], adjudication: Any | None) -> str:
@@ -1048,6 +1184,7 @@ def _month_slices(start: datetime, end: datetime):
 
 def _parse_iso(value: str) -> datetime:
     normalized = value.replace("Z", "+00:00")
+    normalized = re.sub(r"([+-]\d{2})$", r"\1:00", normalized)
     fractional = re.match(r"^(.*?\.)(\d+)([+-]\d{2}:\d{2})?$", normalized)
     if fractional:
         prefix, digits, offset = fractional.groups()

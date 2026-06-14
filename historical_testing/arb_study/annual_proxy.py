@@ -12,7 +12,12 @@ from typing import Any
 from .models import MatchedMarket
 from .adaptive_sampling import adaptive_sampling_windows
 from .official_api import KalshiOfficialClient, PolymarketOfficialClient
-from .official_catalog import _parse_iso as _parse_catalog_iso
+from .official_catalog import (
+    _kalshi_record,
+    _parse_iso as _parse_catalog_iso,
+    _poly_record,
+    _sports_contract_rejection,
+)
 from .official_price_scanner import _align_official_series, _evaluate_proxy_state
 from .scenario import classify_domain, classify_scenario, scenario_metadata
 from .serde import read_json, write_json
@@ -665,6 +670,18 @@ def _strict_title_equivalent_matches(
     rejected = []
     for match in matches:
         if match.relation == "official_structured_identity_exact_pair":
+            kalshi_record = _kalshi_record(match.kalshi.raw)
+            poly_record = _poly_record(match.polymarket.raw)
+            reason = (
+                _sports_contract_rejection(kalshi_record, poly_record)
+                if kalshi_record
+                and poly_record
+                and (kalshi_record["identity"].is_sports or poly_record["identity"].is_sports)
+                else None
+            )
+            if reason:
+                rejected.append({"match_id": match.match_id, "reason": reason})
+                continue
             accepted.append(match)
             continue
         reason = strict_market_rejection(match)

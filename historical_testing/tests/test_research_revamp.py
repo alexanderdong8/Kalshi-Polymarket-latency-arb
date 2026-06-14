@@ -460,6 +460,11 @@ def test_official_catalog_parser_accepts_variable_fractional_second_precision() 
     assert parsed.microsecond == 409600
 
 
+def test_official_catalog_parser_accepts_short_utc_offset() -> None:
+    parsed = _parse_iso("2025-11-30 16:00:00+00")
+    assert parsed.utcoffset().total_seconds() == 0
+
+
 def test_portfolio_keeps_cash_locked_and_allows_only_one_active_position_per_pair() -> None:
     opportunities = [
         {

@@ -9,6 +9,7 @@ from typing import Any
 
 from .official_api import KalshiOfficialClient, PolymarketGammaClient
 from .official_catalog import (
+    MATCHING_GATE_VERSION,
     _dedupe,
     _fetch_polymarket_month,
     _month_slices,
@@ -348,7 +349,7 @@ def normalize_monthly_cache(
             "polymarket_catalog_focus_scenarios": polymarket_scenarios["focus"],
             "polymarket_catalog_broad_scenarios": polymarket_scenarios["broad"],
             "min_score": min_score,
-            "matching_gate_version": 5,
+            "matching_gate_version": MATCHING_GATE_VERSION,
             "openai_adjudication_enabled": bool(adjudicator),
             "openai_adjudication_spent_usd": adjudicator.spent_usd if adjudicator else 0.0,
             "kalshi_historical_months": {
