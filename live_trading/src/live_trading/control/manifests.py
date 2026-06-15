@@ -16,6 +16,7 @@ def write_manifest(root: Path, candidate: dict[str, Any]) -> tuple[Path, str]:
             "name": mapping["name"],
             "kalshi_ticker": mapping["kalshi_ticker"],
             "polymarket_us_slug": mapping["polymarket_us_slug"],
+            "polymarket_side": mapping.get("polymarket_side", "long"),
         }
         for key in (
             "polymarket_contract_address",

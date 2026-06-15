@@ -22,7 +22,7 @@ class FakeLiveOrderClient(LiveOrderClient):
     async def _request_polymarket(self, method, path, body=None):
         assert method == "POST"
         assert path == "/v1/orders"
-        assert body["intent"] == "ORDER_INTENT_BUY_LONG"
+        self.last_poly_body = body
         return {
             "id": "poly-order",
             "executions": [
@@ -61,5 +61,28 @@ def test_live_order_adapters_are_mockable_and_normalize_fills(tmp_path):
         assert kalshi.fees_paid == Decimal("0.02")
         assert poly.filled_size == Decimal("2")
         assert poly.fill_vwap == Decimal("0.39")
+        assert client.last_poly_body["intent"] == "ORDER_INTENT_BUY_LONG"
+
+    asyncio.run(run())
+
+
+def test_polymarket_short_execution_key_uses_short_intent_and_real_slug(tmp_path):
+    async def run():
+        client = FakeLiveOrderClient(
+            _settings(), ExecutionJournal(tmp_path / "journal.sqlite3")
+        )
+        await client.submit_ioc(
+            Order(
+                "polymarket_us",
+                "B",
+                "shared-market::short",
+                "buy",
+                Decimal("2"),
+                Decimal("0.40"),
+            )
+        )
+
+        assert client.last_poly_body["marketSlug"] == "shared-market"
+        assert client.last_poly_body["intent"] == "ORDER_INTENT_BUY_SHORT"
 
     asyncio.run(run())

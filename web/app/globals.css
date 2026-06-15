@@ -78,6 +78,7 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .candidate-topline > span:first-child { font: 600 10px var(--font-mono), monospace; text-transform: uppercase; color: var(--muted); }
 .candidate-card h2 { font: 500 25px/1.1 var(--font-display), serif; margin: 23px 0 10px; }
 .candidate-card > p { color: var(--muted); line-height: 1.55; font-size: 12px; }
+.candidate-card > .evidence-line { margin: 10px 0 0; font-size: 10px; text-transform: capitalize; }
 .score-grid { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); margin-top: auto; }
 .score-grid span { padding: 10px; }
 .score-grid span:nth-child(odd) { border-right: 1px solid var(--line); }

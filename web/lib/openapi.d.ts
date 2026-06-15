@@ -572,6 +572,12 @@ export interface components {
             /** Polymarket Us Slug */
             polymarket_us_slug: string;
             /**
+             * Polymarket Side
+             * @default long
+             * @enum {string}
+             */
+            polymarket_side: "long" | "short";
+            /**
              * Kalshi Title
              * @default
              */
@@ -636,6 +642,61 @@ export interface components {
              * @default Historical prior unavailable
              */
             evidence_label: string;
+            /**
+             * Expected Deployable Profit
+             * @default 0
+             */
+            expected_deployable_profit: number;
+            /**
+             * Executable Profit
+             * @default 0
+             */
+            executable_profit: number;
+            /**
+             * Selected Size
+             * @default 0
+             */
+            selected_size: number;
+            /**
+             * Completion Probability
+             * @default 0
+             */
+            completion_probability: number;
+            /**
+             * Historical Multiplier
+             * @default 1
+             */
+            historical_multiplier: number;
+            /**
+             * Historical Evidence Quality
+             * @default none
+             */
+            historical_evidence_quality: string;
+            /**
+             * Historical Sample Size
+             * @default 0
+             */
+            historical_sample_size: number;
+            /**
+             * Event State
+             * @default unknown
+             */
+            event_state: string;
+            /**
+             * Max Slippage Per Share
+             * @default 0
+             */
+            max_slippage_per_share: number;
+            /** Ranking Components */
+            ranking_components?: {
+                [key: string]: number;
+            };
+            /** Size Curve */
+            size_curve?: {
+                [key: string]: unknown;
+            }[];
+            /** Exclusion Reasons */
+            exclusion_reasons?: string[];
         };
         /** ScanJob */
         ScanJob: {

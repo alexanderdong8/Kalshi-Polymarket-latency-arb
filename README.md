@@ -39,11 +39,15 @@ web/                                      Next.js frontend
     v
 live_trading/src/live_trading/control/    FastAPI control plane
     |
-    +--> live_trading/runtime.py          event and mode workers
+    +--> live_trading/scanner/            event matching and deployable-profit rank
+    +--> live_trading/market_data/        shared venue subscriptions and books
+    +--> live_trading/workers/            affected-event strategy shards
+    +--> live_trading/pooled_session.py   independent event and mode state
     |        |
     |        v
     |    live_trading/src/live_trading/
     |      strategy/                      shared Python trading strategy
+    |      runtime.py                     legacy per-event fallback
     |
     +--> backtesting/                     historical replay of that strategy
 

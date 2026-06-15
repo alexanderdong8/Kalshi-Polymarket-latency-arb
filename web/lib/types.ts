@@ -9,12 +9,32 @@ export type Ranking = {
   mapping_confidence: number;
   total_score: number;
   evidence_label: string;
+  expected_deployable_profit: number;
+  executable_profit: number;
+  selected_size: number;
+  completion_probability: number;
+  historical_multiplier: number;
+  historical_evidence_quality: string;
+  historical_sample_size: number;
+  event_state: string;
+  max_slippage_per_share: number;
+  ranking_components: Record<string, number>;
+  size_curve: {
+    requested_size: number;
+    achievable_size: number;
+    net_edge_per_share: number;
+    executable_profit: number;
+    max_slippage_per_share: number;
+    eligible: boolean;
+  }[];
+  exclusion_reasons: string[];
 };
 
 export type Mapping = {
   name: string;
   kalshi_ticker: string;
   polymarket_us_slug: string;
+  polymarket_side: "long" | "short";
   kalshi_title: string;
   polymarket_title: string;
   kalshi_rules?: string | null;

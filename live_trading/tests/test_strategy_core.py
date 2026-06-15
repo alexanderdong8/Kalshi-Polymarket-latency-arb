@@ -47,6 +47,43 @@ def test_detector_chooses_cheapest_full_l2_vwap_per_outcome():
     assert evaluation.legs[1].chosen_venue == "kalshi"
 
 
+def test_bridge_derives_long_and_short_outcomes_from_one_polymarket_book():
+    async def run():
+        from live_trading.models import BookState, PriceLevel
+        from live_trading.strategy.bridge import StrategyBookBridge
+
+        event = EventSpec(
+            "Binary Event",
+            None,
+            (
+                OutcomeSpec("A", "K-A", "shared", "long"),
+                OutcomeSpec("B", "K-B", "shared", "short"),
+            ),
+        )
+        store = BookStore()
+        bridge = StrategyBookBridge(event, store)
+        state = BookState(
+            venue="polymarket_us",
+            market_key="shared",
+            yes_bid=Decimal("0.39"),
+            yes_ask=Decimal("0.41"),
+            no_bid=Decimal("0.59"),
+            no_ask=Decimal("0.61"),
+            raw_yes_bids=(PriceLevel(Decimal("0.39"), Decimal("100")),),
+            raw_yes_asks=(PriceLevel(Decimal("0.41"), Decimal("100")),),
+            received_ts=datetime.now(timezone.utc),
+        )
+        await bridge.apply(state)
+        books = await store.snapshot()
+
+        assert books[("polymarket_us", "A")].market_key == "shared"
+        assert books[("polymarket_us", "A")].yes_asks[0].price == Decimal("0.41")
+        assert books[("polymarket_us", "B")].market_key == "shared::short"
+        assert books[("polymarket_us", "B")].yes_asks[0].price == Decimal("0.61")
+
+    asyncio.run(run())
+
+
 def test_paper_ioc_does_not_mutate_public_market_book():
     async def run():
         store = BookStore()

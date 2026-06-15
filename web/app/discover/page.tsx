@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw, Search, Sparkles } from "lucide-react";
-import { api, pct } from "@/lib/api";
+import { api, money, pct } from "@/lib/api";
 import type { Candidate, ScanJob } from "@/lib/types";
 import { EmptyState, PageHead, Progress, StatusBadge } from "@/components/ui";
 
@@ -78,11 +78,14 @@ export default function DiscoverPage() {
               <h2>{candidate.name}</h2>
               <p>{candidate.description || "Settlement details available in event review."}</p>
               <div className="score-grid">
-                <span><small>Net edge</small><b>{pct(candidate.ranking.executable_net_edge)}</b></span>
-                <span><small>Historical</small><b>{pct(candidate.ranking.historical_suitability, true)}</b></span>
-                <span><small>Mapping</small><b>{pct(candidate.ranking.mapping_confidence)}</b></span>
-                <span><small>Outcomes</small><b>{candidate.mappings.length}</b></span>
+                <span><small>Expected profit</small><b>{money(candidate.ranking.expected_deployable_profit)}</b></span>
+                <span><small>Executable now</small><b>{money(candidate.ranking.executable_profit)}</b></span>
+                <span><small>Completion estimate</small><b>{pct(candidate.ranking.completion_probability)}</b></span>
+                <span><small>Deployable size</small><b>{candidate.ranking.selected_size || "—"}</b></span>
               </div>
+              <p className="evidence-line">
+                {candidate.ranking.event_state.replaceAll("_", " ")} · {candidate.ranking.evidence_label}
+              </p>
               <div className="candidate-footer">
                 <span className={candidate.exhaustive ? "coverage good" : "coverage"}>
                   {candidate.exhaustive ? "Complete coverage" : "Coverage warning"}
@@ -129,7 +132,15 @@ function ReviewDialog({ candidate, onClose }: { candidate: Candidate; onClose: (
         <div className="review-summary">
           <div><small>LLM confidence</small><strong>{pct(candidate.llm_confidence)}</strong></div>
           <div><small>Complete outcomes</small><strong>{candidate.exhaustive ? "Yes" : "No"}</strong></div>
-          <div><small>Approval version</small><strong>Created on approval</strong></div>
+          <div><small>Expected deployable profit</small><strong>{money(candidate.ranking.expected_deployable_profit)}</strong></div>
+          <div><small>Selected size</small><strong>{candidate.ranking.selected_size || "Unavailable"}</strong></div>
+          <div><small>Completion estimate</small><strong>{pct(candidate.ranking.completion_probability)}</strong></div>
+          <div><small>Current net edge</small><strong>{pct(candidate.ranking.executable_net_edge)}</strong></div>
+        </div>
+        <div className="reasoning">
+          <b>Ranking evidence</b>
+          <p>{candidate.ranking.evidence_label}. Current event state: {candidate.ranking.event_state.replaceAll("_", " ")}. Historical multiplier: {candidate.ranking.historical_multiplier.toFixed(3)}.</p>
+          {candidate.ranking.exclusion_reasons.map((reason) => <p key={reason}>{reason}</p>)}
         </div>
         <div className="reasoning"><b>Settlement review</b><p>{candidate.llm_reasoning ?? "No LLM judgment is available. Approval remains blocked."}</p></div>
         <div className="mapping-table">
@@ -138,7 +149,7 @@ function ReviewDialog({ candidate, onClose }: { candidate: Candidate; onClose: (
             <div className="mapping-row" key={mapping.name}>
               <strong>{mapping.name}</strong>
               <span><b>{mapping.kalshi_ticker}</b><small>{mapping.kalshi_title}</small></span>
-              <span><b>{mapping.polymarket_us_slug}</b><small>{mapping.polymarket_title}</small></span>
+              <span><b>{mapping.polymarket_us_slug} · {mapping.polymarket_side}</b><small>{mapping.polymarket_title}</small></span>
             </div>
           ))}
         </div>

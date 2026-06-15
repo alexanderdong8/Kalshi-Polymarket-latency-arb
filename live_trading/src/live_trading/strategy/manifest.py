@@ -75,6 +75,7 @@ def load_event_manifest(path: str | Path, *, require_approved: bool = False) -> 
             polymarket_slug=str(
                 row.get("polymarket_us_slug") or row.get("polymarket_slug") or ""
             ).strip(),
+            polymarket_side=str(row.get("polymarket_side") or "long").strip().lower(),  # type: ignore[arg-type]
         )
         if not all((outcome.name, outcome.kalshi_ticker, outcome.polymarket_slug)):
             raise ManifestError(f"Outcome #{index + 1} is missing a required identifier.")
@@ -82,11 +83,16 @@ def load_event_manifest(path: str | Path, *, require_approved: bool = False) -> 
             raise ManifestError(f"Duplicate outcome name: {outcome.name}")
         if outcome.kalshi_ticker in seen_kalshi:
             raise ManifestError(f"Duplicate Kalshi ticker: {outcome.kalshi_ticker}")
-        if outcome.polymarket_slug in seen_poly:
-            raise ManifestError(f"Duplicate Polymarket identifier: {outcome.polymarket_slug}")
+        if outcome.polymarket_side not in {"long", "short"}:
+            raise ManifestError(
+                f"Outcome #{index + 1} has invalid polymarket_side: {outcome.polymarket_side}"
+            )
+        poly_identifier = f"{outcome.polymarket_slug}:{outcome.polymarket_side}"
+        if poly_identifier in seen_poly:
+            raise ManifestError(f"Duplicate Polymarket identifier: {poly_identifier}")
         seen_names.add(outcome.name)
         seen_kalshi.add(outcome.kalshi_ticker)
-        seen_poly.add(outcome.polymarket_slug)
+        seen_poly.add(poly_identifier)
         outcomes.append(outcome)
         historical[outcome.name] = HistoricalOutcome(
             polymarket_contract_address=_optional(row.get("polymarket_contract_address")),

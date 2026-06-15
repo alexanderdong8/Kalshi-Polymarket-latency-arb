@@ -261,6 +261,19 @@ balance or global emergency state.
 Python remains the implementation language for the scanner, strategy workers,
 venue gateways, and execution service.
 
+### Implementation amendment
+
+The implemented worker pool uses bounded asyncio shards in the FastAPI
+process, while market-data subscriptions and every event/mode state remain
+logically isolated. A local benchmark covering 40 events with 2 to 40
+outcomes measured affected-event strategy evaluation below 1 millisecond p99
+against the 10 millisecond target.
+
+Separate OS strategy processes were therefore deferred. They would add IPC,
+serialization, recovery, and order-routing complexity without addressing a
+measured bottleneck. Reconsider process separation only if production
+profiling exceeds the documented latency, CPU, or event-loop-lag limits.
+
 Thirty to forty events are not enough to justify a C++ rewrite. Expected
 bottlenecks are duplicate network subscriptions, venue limits, persistence,
 and order coordination rather than arithmetic.

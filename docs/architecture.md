@@ -348,14 +348,24 @@ The backend:
 
 1. Fetches fresh active Kalshi and Polymarket US catalogs.
 2. Stores an audit snapshot in SQLite.
-3. Performs deterministic contract matching.
-4. Groups matched contracts into complete events.
-5. Checks for duplicate or missing outcome mappings.
-6. Checks that all active Kalshi event contracts are represented.
-7. Fetches read-only L2 snapshots.
-8. Calculates executable edge, fillable depth, and freshness.
-9. Adds the historical category prior.
-10. Runs strict structured LLM settlement-rule review.
+3. Generates broad event-level candidates using identifiers, participants,
+   aliases, dates, categories, and market types.
+4. Assigns outcomes one-to-one and checks complete event coverage.
+5. Runs strict structured LLM settlement-rule review.
+6. Fetches one instantaneous read-only L2 snapshot for every mapped outcome.
+7. Evaluates executable profit across multiple basket sizes.
+8. Classifies the event as pregame, in-play, lifecycle, or near settlement.
+9. Resolves the closest historical subscenario evidence.
+10. Estimates completion quality from mapping, freshness, balanced depth,
+    slippage, leg count, event state, and evidence quality.
+11. Ranks by expected deployable dollar profit.
+
+For a binary Polymarket US market represented by one slug, the scanner maps
+the long and short sides separately. The manifest records
+`polymarket_side: long|short`; market data subscribes to the slug once, and
+the strategy bridge derives the short-side book by inverting the long book.
+Live execution translates the internal short-side key into the venue's short
+order intent.
 
 The LLM compares:
 
@@ -505,21 +515,31 @@ design.
 
 FastAPI itself does not run the event strategy inside an HTTP request.
 
-`RuntimeSupervisor` creates an isolated child process for each:
+`RuntimeSupervisor` uses pooled mode by default. One shared market-data
+gateway deduplicates Kalshi and Polymarket US subscriptions across active
+events and modes. Stable strategy-worker shards route each book update only
+to affected sessions.
+
+Each `approved event + mode` retains independent detector, momentum, budget,
+order, position, exit, journal, and PnL state. Paper and live state therefore
+remain separate even when they consume the same public books.
+
+The legacy one-subprocess-per-event runtime remains available with:
 
 ```text
-approved event + mode
+RUNTIME_ARCHITECTURE=legacy
 ```
 
-Examples:
+Pooled mode is configured with:
 
 ```text
-NBA Finals Winner + paper
-NBA Finals Winner + live
-Election Winner + paper
+RUNTIME_ARCHITECTURE=pooled
+STRATEGY_WORKER_COUNT=2
 ```
 
-Paper and live state therefore remain separate even for the same event.
+The worker shards are bounded asyncio workers. A benchmark covering 40 events
+with 2 to 40 outcomes measured affected-event evaluation below the 10 ms p99
+target, so OS-process IPC and a native rewrite are not currently justified.
 
 The browser may close without stopping those workers. Workers stop only when:
 
@@ -661,6 +681,8 @@ MAX_MATCHES=100
 MIN_MATCH_CONFIDENCE=0.74
 TRADE_SIZE=100
 LIVE_TRADING_DATA_DIR=live_trading/data
+RUNTIME_ARCHITECTURE=pooled
+STRATEGY_WORKER_COUNT=2
 ```
 
 Strategy presets and advanced settings can be managed from **Settings** in the
@@ -746,18 +768,23 @@ npm audit --omit=dev
 
 Current verified baseline:
 
-- 35 Python tests passing.
+- 56 Python tests passing.
 - Frontend live-activation safety test passing.
+- Frontend ESLint passing.
 - Next.js production build passing.
 - Production npm audit reporting zero vulnerabilities.
 - Complete `start.ps1` and `stop.ps1` lifecycle passing.
+- Forty-event affected-event evaluation p99 below 1 millisecond in the latest
+  local benchmark run, against a 10 millisecond target.
 
 ## Current Limitations
 
 - Automated event discovery requires working venue catalog APIs and OpenAI
   structured matching.
-- The scanner's current-edge rank uses read-only L2 snapshots; continuous
-  updates begin after an approved event has an active runtime.
+- The scanner uses one instantaneous read-only L2 snapshot. It ranks the size
+  with the greatest executable dollar profit after fees and buffer, then
+  applies a conservative completion estimate and bounded historical
+  multiplier. Missing history is neutral.
 - Live private fill handling currently includes REST reconciliation; richer
   private fill-stream integration should precede materially larger live size.
 - Historical replay uses international Polymarket until enough complete

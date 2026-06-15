@@ -10,6 +10,7 @@ class OutcomeMapping(BaseModel):
     name: str
     kalshi_ticker: str
     polymarket_us_slug: str
+    polymarket_side: Literal["long", "short"] = "long"
     kalshi_title: str = ""
     polymarket_title: str = ""
     kalshi_rules: str | None = None
@@ -29,6 +30,18 @@ class RankingBreakdown(BaseModel):
     mapping_confidence: float = 0
     total_score: float = 0
     evidence_label: str = "Historical prior unavailable"
+    expected_deployable_profit: float = 0
+    executable_profit: float = 0
+    selected_size: float = 0
+    completion_probability: float = 0
+    historical_multiplier: float = 1
+    historical_evidence_quality: str = "none"
+    historical_sample_size: int = 0
+    event_state: str = "unknown"
+    max_slippage_per_share: float = 0
+    ranking_components: dict[str, float] = Field(default_factory=dict)
+    size_curve: list[dict[str, Any]] = Field(default_factory=list)
+    exclusion_reasons: list[str] = Field(default_factory=list)
 
 
 class Candidate(BaseModel):
@@ -138,4 +151,3 @@ class SettingsStatus(BaseModel):
     storage: dict[str, str]
     workers: list[WorkerState]
     emergency_stop: bool
-

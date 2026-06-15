@@ -94,6 +94,7 @@ class KalshiOrderBook:
             received_ts=received_ts,
             received_monotonic_ns=received_monotonic_ns,
             sequence=self.sequence,
+            state="snapshot",
         )
 
     def apply_delta(
@@ -119,6 +120,7 @@ class KalshiOrderBook:
             received_monotonic_ns=received_monotonic_ns,
             venue_ts=parse_ts(msg.get("ts_ms") or msg.get("ts")),
             sequence=self.sequence,
+            state="delta",
         )
 
     def state(
@@ -127,6 +129,7 @@ class KalshiOrderBook:
         received_monotonic_ns: int | None = None,
         venue_ts: datetime | None = None,
         sequence: int | None = None,
+        state: str | None = None,
     ) -> BookState:
         yes_bids = _sorted_bids(self.yes_bids)
         no_bids = _sorted_bids(self.no_bids)
@@ -154,6 +157,7 @@ class KalshiOrderBook:
             venue_ts=venue_ts,
             received_ts=received_ts or datetime.now(timezone.utc),
             sequence=sequence,
+            state=state,
             received_monotonic_ns=received_monotonic_ns or time.perf_counter_ns(),
         )
 

@@ -305,7 +305,11 @@ live_trading/src/live_trading/workers/
   protocol.py
 ```
 
-Run two workers by default and make the count configurable.
+Run two bounded worker shards by default and make the count configurable.
+The implemented shards are asyncio workers rather than OS processes because
+the 40-event benchmark remained below 1 millisecond p99 for affected-event
+evaluation. Keep the assignment and queue boundaries transport-independent so
+process isolation can be introduced later if profiling justifies it.
 
 Each worker:
 

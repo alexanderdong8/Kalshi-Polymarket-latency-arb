@@ -114,10 +114,11 @@ class LiveOrderClient:
         if venue == "kalshi":
             await self._request_kalshi("DELETE", f"/portfolio/events/orders/{order_id}")
         else:
+            market_slug, _ = _polymarket_market_side(order.market_key)
             await self._request_polymarket(
                 "POST",
                 f"/v1/order/{order_id}/cancel",
-                {"marketSlug": order.market_key},
+                {"marketSlug": market_slug},
             )
         self._resting.pop(order_id, None)
         self.journal.append(
@@ -204,14 +205,27 @@ class LiveOrderClient:
 
     async def _submit_polymarket(self, order: Order, *, post_only: bool) -> OrderResult:
         client_order_id = str(uuid.uuid4())
+        market_slug, contract_side = _polymarket_market_side(order.market_key)
+        if order.side == "buy":
+            intent = (
+                "ORDER_INTENT_BUY_SHORT"
+                if contract_side == "short"
+                else "ORDER_INTENT_BUY_LONG"
+            )
+        else:
+            intent = (
+                "ORDER_INTENT_SELL_SHORT"
+                if contract_side == "short"
+                else "ORDER_INTENT_SELL_LONG"
+            )
         body = {
-            "marketSlug": order.market_key,
+            "marketSlug": market_slug,
             "type": "ORDER_TYPE_LIMIT",
             "price": {"value": str(order.limit_price), "currency": "USD"},
             "quantity": float(order.size),
             "tif": "TIME_IN_FORCE_GOOD_TILL_CANCEL" if post_only else "TIME_IN_FORCE_IMMEDIATE_OR_CANCEL",
             "participateDontInitiate": post_only,
-            "intent": "ORDER_INTENT_BUY_LONG" if order.side == "buy" else "ORDER_INTENT_SELL_LONG",
+            "intent": intent,
             "manualOrderIndicator": "MANUAL_ORDER_INDICATOR_AUTOMATIC",
             "synchronousExecution": not post_only,
             "maxBlockTime": "5",
@@ -312,3 +326,9 @@ def _order_payload(payload: dict[str, Any]) -> dict[str, Any]:
         or row.get("price"),
         "fees": row.get("fees") or 0,
     }
+
+
+def _polymarket_market_side(market_key: str) -> tuple[str, str]:
+    if market_key.endswith("::short"):
+        return market_key.removesuffix("::short"), "short"
+    return market_key.removesuffix("::long"), "long"

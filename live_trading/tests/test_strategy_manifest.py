@@ -45,3 +45,26 @@ event:
     )
     with pytest.raises(ManifestError, match="Duplicate Kalshi"):
         load_event_manifest(path)
+
+
+def test_manifest_allows_shared_polymarket_slug_with_distinct_sides(tmp_path):
+    path = tmp_path / "shared.yaml"
+    path.write_text(
+        """
+event:
+  name: Shared binary market
+  outcomes:
+    - {name: A, kalshi_ticker: K-A, polymarket_us_slug: shared, polymarket_side: long}
+    - {name: B, kalshi_ticker: K-B, polymarket_us_slug: shared, polymarket_side: short}
+review:
+  approved: true
+  exhaustive: true
+  settlement_reviewed: true
+""",
+        encoding="utf-8",
+    )
+
+    manifest = load_event_manifest(path, require_approved=True)
+
+    assert manifest.event.polymarket_slugs == ("shared",)
+    assert manifest.event.outcomes[1].polymarket_market_key == "shared::short"

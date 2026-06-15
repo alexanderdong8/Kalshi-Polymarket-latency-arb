@@ -14,6 +14,15 @@ class OutcomeSpec:
     name: str
     kalshi_ticker: str
     polymarket_slug: str
+    polymarket_side: Literal["long", "short"] = "long"
+
+    @property
+    def polymarket_market_key(self) -> str:
+        return (
+            f"{self.polymarket_slug}::short"
+            if self.polymarket_side == "short"
+            else self.polymarket_slug
+        )
 
 
 @dataclass(frozen=True)
@@ -33,7 +42,7 @@ class EventSpec:
 
     @property
     def polymarket_slugs(self) -> tuple[str, ...]:
-        return tuple(o.polymarket_slug for o in self.outcomes)
+        return tuple(dict.fromkeys(o.polymarket_slug for o in self.outcomes))
 
     def outcome_by_kalshi_ticker(self, ticker: str) -> OutcomeSpec | None:
         return next((o for o in self.outcomes if o.kalshi_ticker == ticker), None)

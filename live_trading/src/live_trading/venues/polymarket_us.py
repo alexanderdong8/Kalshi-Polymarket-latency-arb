@@ -18,30 +18,43 @@ from ..shards import merge_sharded_streams, shard_items
 
 
 def market_from_api(raw: dict[str, Any]) -> VenueMarket:
+    return market_variants_from_api(raw)[0]
+
+
+def market_variants_from_api(raw: dict[str, Any]) -> list[VenueMarket]:
     slug = str(raw.get("slug") or raw.get("marketSlug") or "")
     sides = raw.get("marketSides") or []
     long_side = next((side for side in sides if side.get("long") is True), None) or (sides[0] if sides else {})
     short_side = next((side for side in sides if side.get("long") is False), None) or (sides[1] if len(sides) > 1 else {})
-    return VenueMarket(
-        venue="polymarket_us",
-        market_id=str(raw.get("id") or slug),
-        ticker=None,
-        slug=slug,
-        title=str(raw.get("question") or raw.get("title") or slug),
-        category=raw.get("category"),
-        market_type=raw.get("marketType") or raw.get("sportsMarketType"),
-        start_time=parse_ts(raw.get("gameStartTime") or raw.get("startDate")),
-        close_time=parse_ts(raw.get("endDate") or raw.get("closeTime")),
-        expiration_time=parse_ts(raw.get("endDate") or raw.get("expirationTime")),
-        yes_label=str(long_side.get("description") or "Yes"),
-        no_label=str(short_side.get("description") or "No"),
-        yes_symbol=str(long_side.get("id") or slug),
-        no_symbol=str(short_side.get("id") or f"{slug}:NO"),
-        description=raw.get("description"),
-        rules=raw.get("resolutionSource") or raw.get("description"),
-        active=bool(raw.get("active", True)) and not bool(raw.get("closed", False)),
-        raw=raw,
-    )
+    base_id = str(raw.get("id") or slug)
+
+    def variant(side: dict[str, Any], opposite: dict[str, Any], label: str) -> VenueMarket:
+        enriched = {**raw, "outcome_side": label}
+        return VenueMarket(
+            venue="polymarket_us",
+            market_id=f"{base_id}:{label}",
+            ticker=None,
+            slug=slug,
+            title=str(raw.get("question") or raw.get("title") or slug),
+            category=raw.get("category"),
+            market_type=raw.get("marketType") or raw.get("sportsMarketType"),
+            start_time=parse_ts(raw.get("gameStartTime") or raw.get("startDate")),
+            close_time=parse_ts(raw.get("endDate") or raw.get("closeTime")),
+            expiration_time=parse_ts(raw.get("endDate") or raw.get("expirationTime")),
+            yes_label=str(side.get("description") or ("Yes" if label == "long" else "No")),
+            no_label=str(opposite.get("description") or ("No" if label == "long" else "Yes")),
+            yes_symbol=str(side.get("id") or f"{slug}:{label}"),
+            no_symbol=str(opposite.get("id") or f"{slug}:{'short' if label == 'long' else 'long'}"),
+            description=raw.get("description"),
+            rules=raw.get("resolutionSource") or raw.get("description"),
+            active=bool(raw.get("active", True)) and not bool(raw.get("closed", False)),
+            raw=enriched,
+        )
+
+    variants = [variant(long_side, short_side, "long")]
+    if short_side and short_side != long_side:
+        variants.append(variant(short_side, long_side, "short"))
+    return variants
 
 
 class PolymarketUSClient:
@@ -72,9 +85,9 @@ class PolymarketUSClient:
                 if not rows:
                     break
                 for raw in rows:
-                    market = market_from_api(raw)
-                    if market.active and _category_allowed(market.category, categories):
-                        markets.append(market)
+                    for market in market_variants_from_api(raw):
+                        if market.active and _category_allowed(market.category, categories):
+                            markets.append(market)
                 if len(rows) < int(params["limit"]) or (max_pages is not None and pages_seen >= max_pages):
                     break
                 params["offset"] = int(params["offset"]) + int(params["limit"])

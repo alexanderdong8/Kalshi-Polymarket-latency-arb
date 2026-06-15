@@ -67,6 +67,8 @@ class Settings:
     routine_queue_maxsize: int
     tui_refresh_seconds: Decimal
     metrics_write_seconds: Decimal
+    runtime_architecture: str
+    strategy_worker_count: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -98,4 +100,6 @@ class Settings:
             routine_queue_maxsize=_int_env("ROUTINE_QUEUE_MAXSIZE", 20_000),
             tui_refresh_seconds=_decimal_env("TUI_REFRESH_SECONDS", "0.25"),
             metrics_write_seconds=_decimal_env("METRICS_WRITE_SECONDS", "10"),
+            runtime_architecture=os.getenv("RUNTIME_ARCHITECTURE", "pooled").strip().lower(),
+            strategy_worker_count=max(1, _int_env("STRATEGY_WORKER_COUNT", 2)),
         )
