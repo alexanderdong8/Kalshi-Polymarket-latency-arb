@@ -600,7 +600,7 @@ def write_research_summary(
         "",
         "## Reading Order",
         "",
-        "1. Read [README.md](README.md) for the plain-language methodology.",
+        "1. Read the repository [README](../README.md) for the current system and historical-research context.",
         "2. Read [ANNUAL_SCENARIO_ANALYSIS.md](ANNUAL_SCENARIO_ANALYSIS.md) for the international findings.",
         "3. Read [POLYMARKET_US_PUBLIC_CATALOG_ANALYSIS.md](POLYMARKET_US_PUBLIC_CATALOG_ANALYSIS.md) for the separate US catalog study.",
         "4. Read [ARBITRAGE_TRADE_EXAMPLES.md](ARBITRAGE_TRADE_EXAMPLES.md) for worked trade arithmetic.",

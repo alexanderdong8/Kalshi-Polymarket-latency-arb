@@ -1,3 +1,18 @@
+# Strategy Reference
+
+> **Provenance:** This document was moved from `trade_system/README.md`. It
+> describes the original strategy design and reference implementation supplied
+> in the `trade_system/` folder. The strategy rules were subsequently ported
+> into `live_trading/src/live_trading/strategy/`, which is the implementation
+> used by the current local application and backtester.
+>
+> Statements below about what was or was not implemented describe the original
+> `trade_system` project at the time its README was written. For current system
+> architecture, setup, execution modes, and safety behavior, use the repository
+> root `README.md`.
+
+## Original Trade System README
+
 # Trade System
 
 A cross-venue **latency-arbitrage bot for prediction markets**, targeting events

@@ -1,234 +1,783 @@
-# Prediction Market Cross-Venue Arbitrage Research
+# Prediction-Market Arbitrage System
 
-This repository investigates whether equivalent prediction-market contracts can trade at different prices on Kalshi and Polymarket, and whether those temporary price differences can support a practical cross-venue arbitrage strategy.
+This repository is a local application for discovering, reviewing, paper
+trading, live trading, and historically backtesting complete prediction-market
+events across Kalshi and Polymarket.
 
-## Local Application
+This is the single authoritative README for operating and understanding the
+current system. The original strategy description from the imported
+`trade_system` project is preserved separately in
+[`docs/strategy.md`](docs/strategy.md).
 
-The primary interface is a local Next.js application backed by FastAPI and the
-existing Python strategy engine.
+## Quick Start
+
+From the repository root:
 
 ```powershell
 .\start.ps1
 ```
 
-The application opens at `http://127.0.0.1:3000`. Stop it cleanly with
-`.\stop.ps1`.
+This command:
 
-Use **Discover** to refresh both venue catalogs, automatically match complete
-events, review settlement equivalence, and approve a versioned event. Approved
-events appear in **My Markets**, where paper, live, and backtest modes can be
-configured independently.
+1. Creates `.venv` if it does not exist.
+2. Installs the Python packages when their project metadata changes.
+3. Installs and builds the Next.js application when its package metadata
+   changes.
+4. Starts the FastAPI control service.
+5. Starts the production Next.js server.
+6. Waits for both health checks.
+7. Opens `http://127.0.0.1:3000`.
 
-Architecture and safety decisions are documented in
-[`docs/LOCAL_APPLICATION_ARCHITECTURE.md`](docs/LOCAL_APPLICATION_ARCHITECTURE.md).
+Stop the complete application with:
 
-The project has two complementary parts:
-
-1. **Historical research** asks whether these opportunities appeared in past order books often enough to justify further work.
-2. **Live trading infrastructure** monitors manually reviewed Kalshi and Polymarket US events and supports read-only, paper, and explicitly confirmed live modes.
-3. **Deterministic backtesting** replays PMXT Kalshi and international Polymarket L2 data through the shared multi-outcome strategy.
-
-Live order code is present but remains guarded by reviewed manifests, a per-run capital limit, a startup preview, and an exact `LIVE` confirmation. Automated tests mock execution and never submit real orders.
-
-## The Core Idea
-
-Binary prediction-market shares resolve to either `$1.00` or `$0.00`.
-
-- A `YES` share pays `$1.00` if the event happens.
-- A `NO` share pays `$1.00` if the event does not happen.
-- If a Kalshi contract and a Polymarket contract truly describe the same event, buying `YES` on one venue and `NO` on the other creates a complete payout basket: exactly one side should pay `$1.00`.
-
-Example:
-
-```text
-Kalshi:
-  YES ask = 0.70
-  NO ask  = 0.30
-
-Polymarket:
-  YES ask = 0.50
-  NO ask  = 0.50
-
-Potential arbitrage basket:
-  Buy Kalshi NO at 0.30
-  Buy Polymarket YES at 0.50
-  Total entry cost = 0.80
-  Gross edge = 1.00 - 0.80 = 0.20 per complete pair
+```powershell
+.\stop.ps1
 ```
 
-This is only a real arbitrage if both contracts are genuinely equivalent under their actual resolution rules. Similar titles are not enough. Differences in event scope, cutoff time, settlement source, cancellation rules, overtime treatment, or other contract language can create false positives.
+The browser UI runs on port `3000`. The local-only FastAPI service runs on
+port `8765`.
 
-The real-world strategy also has to account for:
+Recommended local versions:
 
-- Trading fees and fee rounding.
-- Available order-book depth.
-- Slippage.
-- Stale or delayed market data.
-- Partial fills: one leg may fill before the hedge leg.
-- Cross-venue funding and capital allocation.
-- Venue availability, access rules, and API rate limits.
+- Python 3.10 or newer.
+- Node.js 22 LTS.
+- Windows PowerShell or PowerShell 7.
 
-## Repository Structure
+## The Architecture In One Sentence
+
+`web/` is the frontend, `live_trading/src/live_trading/control/` is the API and
+application control plane, `live_trading/src/live_trading/strategy/` is the
+actual shared trading strategy, and `backtesting/` replays historical data
+through that same Python strategy.
+
+The frontend never reimplements trading decisions.
+
+## High-Level Architecture
+
+```text
+Browser
+  |
+  | HTTP
+  v
+web/ - Next.js user interface
+  |
+  | typed REST requests, refreshed through TanStack Query
+  v
+live_trading/control/ - FastAPI control plane and WebSocket event hub
+  |
+  +--> scanner and event matching
+  +--> SQLite control database
+  +--> runtime supervisor
+  +--> backtest job service
+  |
+  +-------------------------------+
+  |                               |
+  v                               v
+live_trading runtime          backtesting package
+  |                               |
+  +----------+--------------------+
+             |
+             v
+live_trading/strategy/ - shared Python strategy
+             |
+             v
+Kalshi + Polymarket venue adapters
+```
+
+## Folder Responsibilities
 
 ```text
 prediction_markets_arb/
-  README.md                  Repository-level orientation
-  historical_testing/        Historical order-book research and reports
-  live_trading/              Monitor, paper, and live multi-outcome engine
-  backtesting/               PMXT virtual-clock strategy replay
-  docs/                      Architecture and operating decisions
+  README.md
+  start.ps1
+  stop.ps1
+
+  web/
+    app/                    Next.js pages
+    components/             reusable UI components
+    lib/                    API helpers, types, generated OpenAPI types
+    test/                   frontend safety tests
+
+  live_trading/
+    src/live_trading/
+      control/              FastAPI, SQLite, scanner, workers, approvals
+      strategy/             detector, depth, fees, sizing, execution, exits
+      venues/               Kalshi and Polymarket US API adapters
+      runtime.py            one event/mode trading runtime
+      live_orders.py        authenticated live order client
+      execution_persistence.py
+      capture.py
+    tests/
+
+  backtesting/
+    src/backtesting/        PMXT loading, validation, virtual-clock simulation
+    tests/
+
+  historical_testing/
+    arb_study/              broader historical research pipeline
+    reports/                generated research artifacts, ignored where large
+    *.md                    research reports
+
+  trade_system/
+    src/trade_system/       original reference implementation
+    tests/                  original script-style strategy checks
+
+  docs/
+    strategy.md             original trade_system README with provenance
 ```
 
-### `historical_testing/`
+### `web/`: frontend only
 
-The historical research package studies past Kalshi / Polymarket order books and asks:
+Everything a user sees in the browser lives in `web/`.
 
-> When equivalent markets diverged, could both legs have been bought for less than `$1.00` using executable prices and visible depth?
+The Next.js application provides:
 
-It includes tooling for market-pair discovery, historical order-book reconstruction, fee and slippage assumptions, opportunity scanning, and summary reports.
+- Discover and scanner controls.
+- Candidate ranking and event review.
+- My Markets watchlist.
+- Independent Paper, Live, and Backtests pages.
+- Event-level basket charts.
+- Per-outcome price and L2 order-book views.
+- Orders, fills, positions, PnL, exposure, and stream-health displays.
+- Credential-presence and connectivity diagnostics.
+- Global emergency-stop controls.
 
-This section of the repository will continue to evolve as the historical methodology and findings are refined.
+The frontend can request actions and display results. It cannot:
 
-Read next: [historical_testing/README.md](historical_testing/README.md)
+- Decide that two events are equivalent.
+- Approve an event by itself.
+- Calculate a trading signal.
+- Calculate order sizing.
+- Simulate fills.
+- Submit venue orders directly.
 
-### `live_trading/`
+Those responsibilities remain in Python.
 
-The live package retains the broad read-only scanner and adds a manifest-driven
-multi-outcome application for monitor, paper, and live execution.
+### `live_trading/src/live_trading/control/`: backend control plane
 
-It:
-
-- Pulls active Kalshi and Polymarket US market catalogs through REST APIs.
-- Matches likely equivalent contracts across venues.
-- Uses authenticated WebSocket streams to keep order books current without repeatedly polling for prices.
-- Splits large subscription sets into concurrent shards of at most `100` markets.
-- Normalizes venue-specific books into comparable `YES` and `NO` executable asks.
-- Recalculates only the affected matched pair immediately after a book update.
-- Applies fee estimates and a configurable slippage buffer.
-- Displays the strongest current candidates in a terminal dashboard.
-- Records sampled book snapshots, opportunity events, and metrics to bounded local SQLite storage.
-- Includes synthetic benchmarks for `100`, `250`, and `500` matched pairs.
-
-The live scanner is optimized for a local Windows PC and has been tested at `500` synthetic matched pairs without requiring one process per event.
-
-Read next: [live_trading/README.md](live_trading/README.md)
-
-## Current Status
-
-Implemented:
-
-- Historical arbitrage research tooling.
-- Live Kalshi REST and authenticated WebSocket connectivity.
-- Live Polymarket US REST and authenticated WebSocket connectivity.
-- Cross-venue matching heuristics.
-- Event-driven live opportunity detection.
-- Concurrent WebSocket subscription sharding.
-- Fee-aware edge calculations.
-- Local terminal dashboard.
-- Bounded local storage with a default `3 GB` generated-data quota.
-- Local steady, burst, and stress benchmarks up to `500` matched pairs.
-- Automated tests for live scanner behavior and historical research regressions.
-
-Not implemented:
-
-- Live order placement.
-- Order cancellation.
-- Automated hedge or unwind behavior.
-- Partial-fill handling.
-- Paper-trading fill simulation.
-- Production deployment.
-
-The current goal is to gather enough trustworthy live data to determine whether adding execution logic is justified.
-
-## How The Live Scanner Fits Together
+The FastAPI application is defined in:
 
 ```text
-REST market discovery
-        |
-        v
-cross-venue market matcher
-        |
-        v
-concurrent Kalshi and Polymarket US WebSocket shards
-        |
-        v
-normalized in-memory order books
-        |
-        v
-direct affected-pair lookup and immediate arbitrage evaluation
-        |
-        +--------------------+
-        |                    |
-        v                    v
-terminal dashboard     bounded SQLite recording
+live_trading/src/live_trading/control/app.py
 ```
 
-The important performance decision is that incoming updates do not trigger a full scan of every matched pair. Each venue market key maps directly to its related matched pair, so one message causes only the relevant comparison to run.
+It exposes typed endpoints for:
 
-## Quick Start
+- Health and shutdown.
+- Catalog scans and scan progress.
+- Candidate search and details.
+- Event approval.
+- Watchlist management.
+- Paper and live activation.
+- Worker state and stopping.
+- Global emergency stop.
+- Backtest creation and results.
+- Strategy presets.
+- Settings and read-only diagnostics.
 
-Install the live scanner:
+The control package also contains:
+
+| Module | Responsibility |
+| --- | --- |
+| `db.py` | SQLite control-plane persistence |
+| `scanner.py` | catalog refresh, matching, event assembly, L2 ranking |
+| `llm_matcher.py` | strict structured settlement-rule review |
+| `manifests.py` | immutable versioned approved-event YAML |
+| `supervisor.py` | isolated event/mode worker processes |
+| `backtests.py` | historical validation and background jobs |
+| `hub.py` | bounded WebSocket updates for the UI |
+| `schemas.py` | Pydantic API contracts |
+
+The generated TypeScript OpenAPI declarations are stored at:
+
+```text
+web/lib/openapi.d.ts
+```
+
+Regenerate them while the API is running with:
 
 ```powershell
-cd C:\Users\alexa\Documents\CompSci\prediction_markets_arb\live_trading
-python -m pip install -e .[test]
+cd web
+npm run generate:api
 ```
 
-Return to the repository root:
+### `live_trading/src/live_trading/strategy/`: shared trading logic
+
+This is the strategy implementation used by both live/paper trading and
+historical replay.
+
+The strategy was ported from the original `trade_system` project so the
+current application does not depend on that reference package at runtime.
+
+It owns:
+
+- Multi-outcome event definitions.
+- Full L2 depth walking.
+- Per-outcome venue selection.
+- Fee calculation and fee rounding.
+- Basket evaluation.
+- Momentum and opportunity-stability filters.
+- Capital and depth-aware sizing.
+- Parallel entry execution.
+- Partial-fill retries.
+- Unhedged-loss checks.
+- Forced unwind.
+- Position tracking.
+- Maker exit attempts.
+- Re-pegging and exit depth limits.
+- Exit-side rebalance or revert-to-complete-basket behavior.
+- Hold-to-settlement position state.
+- PnL calculations.
+
+The original source description is retained in
+[`docs/strategy.md`](docs/strategy.md). Current behavior should always be
+verified against `live_trading/src/live_trading/strategy/` and its tests
+because the original document contains historical implementation-status
+statements.
+
+### `live_trading/runtime.py`: one trading session
+
+A runtime represents one approved event in one mode.
+
+The runtime:
+
+1. Loads the immutable approved event manifest.
+2. Creates a normalized strategy book store.
+3. Connects to the Kalshi and Polymarket US feeds.
+4. Maps venue-specific books to the approved outcomes.
+5. Records selected L2 data.
+6. Evaluates the complete basket every 100 milliseconds.
+7. Sends fire events to the shared executor in paper or live mode.
+8. Tracks entries, exits, positions, and accounting.
+9. Writes a bounded display snapshot for the control service.
+
+The modes are:
+
+| Mode | Market data | Orders |
+| --- | --- | --- |
+| Monitor | live Kalshi + Polymarket US | none |
+| Paper | live Kalshi + Polymarket US | locally simulated |
+| Live | live Kalshi + Polymarket US | authenticated venue APIs |
+
+Paper fills do not mutate the public market-data books.
+
+### `live_trading/venues/`: venue boundary
+
+Venue adapters translate exchange-specific APIs into common internal models.
+
+- `kalshi.py` handles market discovery, REST order-book snapshots, and
+  authenticated WebSocket books.
+- `polymarket_us.py` handles Polymarket US discovery, snapshots, and
+  authenticated WebSocket books.
+- `live_orders.py` handles live order submission, cancellation, balances,
+  positions, and reconciliation.
+- `auth.py` owns venue request signing.
+
+This boundary keeps venue payload formats and authentication details out of the
+strategy.
+
+### `backtesting/`: historical strategy replay
+
+The backtester imports the shared strategy models and detector from
+`live_trading`. It does not contain a separate TypeScript or Python rewrite of
+the strategy.
+
+Historical replay currently uses:
+
+- PMXT Kalshi L2.
+- PMXT international Polymarket L2.
+
+Live and paper trading use:
+
+- Kalshi.
+- Polymarket US.
+
+This distinction is important. International Polymarket historical fills are
+useful strategy evidence, but they are not proof of how Polymarket US would
+have filled.
+
+The backtester:
+
+1. Loads an approved event manifest.
+2. Requires historical identifiers for every outcome.
+3. Loads and verifies the PMXT updates.
+4. Rejects missing books, missing fees, invalid archives, and non-overlapping
+   coverage.
+5. Orders updates by `timestamp_received`.
+6. Advances a virtual clock.
+7. Runs the detector every 100 milliseconds.
+8. Simulates 50, 250, 500, and 1,000 millisecond order-arrival delays.
+9. Reports the strategy's maker model and the stricter price-pass model
+   separately.
+10. Returns ending cash, money gained, ROI, fills, fees, and replay data.
+
+The default bankroll is `$1,000`.
+
+### `historical_testing/`: research, not application runtime
+
+This folder contains the broader research pipeline used to study categories,
+strict cross-venue pairs, annual price-history proxies, PMXT L2 evidence, and
+scenario suitability.
+
+The scanner can consume its historical leaderboard output as one ranking
+component. The folder is not part of an event's live order path.
+
+Research conclusions and generated reports remain in the specifically named
+Markdown files under `historical_testing/`.
+
+### `trade_system/`: reference only
+
+`trade_system/` is the original strategy project supplied by the user's
+collaborator.
+
+It is intentionally retained for:
+
+- Strategy provenance.
+- Comparison against the ported implementation.
+- Original tests and design examples.
+
+The current application does not import it at runtime. The original README was
+moved to [`docs/strategy.md`](docs/strategy.md).
+
+## Complete User Flow
+
+### 1. Discover markets
+
+The user opens **Discover** and starts a scan.
+
+The backend:
+
+1. Fetches fresh active Kalshi and Polymarket US catalogs.
+2. Stores an audit snapshot in SQLite.
+3. Performs deterministic contract matching.
+4. Groups matched contracts into complete events.
+5. Checks for duplicate or missing outcome mappings.
+6. Checks that all active Kalshi event contracts are represented.
+7. Fetches read-only L2 snapshots.
+8. Calculates executable edge, fillable depth, and freshness.
+9. Adds the historical category prior.
+10. Runs strict structured LLM settlement-rule review.
+
+The LLM compares:
+
+- Event identity.
+- Outcome meaning.
+- Settlement scope.
+- Deadlines and cutoffs.
+- Cancellation treatment.
+- Resolution criteria.
+
+The LLM does not calculate prices, fills, PnL, or trading decisions.
+
+### 2. Review and approve an event
+
+The review page displays:
+
+- Every outcome.
+- Kalshi ticker to Polymarket US slug mapping.
+- Venue titles and settlement rules.
+- Deterministic check results.
+- LLM confidence, reasoning, and warnings.
+- Completeness status.
+
+Approval is blocked when:
+
+- Fewer than two outcomes exist.
+- Outcome identifiers are duplicated.
+- Active outcomes are missing.
+- Deterministic conflicts remain.
+- The LLM is unavailable.
+- The LLM rejects equivalence.
+- The user has not confirmed completeness and settlement review.
+
+Approval writes an immutable versioned manifest under:
+
+```text
+live_trading/data/control/approved_events/
+```
+
+Watchlist entries represent complete events, not individual contracts.
+
+### 3. Assign modes
+
+From **My Markets**, an approved event may independently be assigned to:
+
+- Paper.
+- Live.
+- Backtest.
+- Any combination of those modes.
+
+Each event and mode has its own budget and configuration.
+
+### 4. Run paper trading
+
+Paper mode launches a local worker using live public L2 feeds and the Python
+strategy.
+
+- Orders and fills are simulated.
+- Public books remain unchanged.
+- No trades are invented while the application is offline.
+- Paper sessions stop when the application shuts down.
+- Complete held baskets remain identifiable for settlement accounting.
+
+### 5. Run live trading
+
+Live activation requires:
+
+1. An approved unchanged mapping.
+2. Present credentials.
+3. Venue reconciliation.
+4. A balance and position preview.
+5. A positive event budget.
+6. An exact typed `LIVE` confirmation.
+
+The preview shows:
+
+- Kalshi balance.
+- Polymarket US balance.
+- Existing positions.
+- Unresolved local orders.
+- Maximum new exposure.
+- Event mappings and warnings.
+
+The runtime uses the same detector and executor as paper mode, but swaps in the
+authenticated `LiveOrderClient`.
+
+### 6. Run a backtest
+
+The user selects an approved event and a bankroll.
+
+Before replay, the backend validates:
+
+- Every outcome has historical identifiers.
+- Both venues have complete L2.
+- Coverage overlaps.
+- Updates are valid and ordered.
+- International Polymarket fee metadata exists.
+
+If any requirement is missing, the run is disabled with the exact reason. The
+system never silently substitutes Polymarket US fees or fabricated depth.
+
+## Trading Strategy Summary
+
+For an event with `N >= 2` mutually exclusive and exhaustive outcomes, one YES
+contract for every outcome forms a complete basket. Exactly one YES contract
+should settle at `$1`; the others should settle at `$0`.
+
+For each outcome, the detector:
+
+1. Walks the Kalshi YES ask depth.
+2. Walks the Polymarket US YES ask depth.
+3. Applies the configured depth haircut.
+4. Chooses the venue with the lower executable VWAP.
+
+The basket is:
+
+```text
+basket cost = sum of the chosen executable YES VWAP for every outcome
+```
+
+The detector then adds fees and the configured buffer.
+
+A trade can fire only when:
+
+- The complete entry cost is below the threshold.
+- Every outcome has a usable book.
+- Books are fresh.
+- Prices are within configured bounds.
+- The requested size is executable through L2.
+- The opportunity passes the momentum/stability requirements.
+
+After a fire:
+
+- All legs are submitted in parallel.
+- Residual partial fills are retried while completion remains profitable.
+- Excessive unhedged loss triggers an early unwind.
+- A retry timeout forces an unwind of filled legs.
+- Complete baskets enter position tracking.
+- The exit monitor may place maker sells when the venues re-couple.
+- Exit partials are rebalanced or reverted into a complete basket.
+- Baskets that cannot exit safely remain held for settlement.
+
+See [`docs/strategy.md`](docs/strategy.md) for the original detailed strategy
+design.
+
+## Process And Worker Model
+
+FastAPI itself does not run the event strategy inside an HTTP request.
+
+`RuntimeSupervisor` creates an isolated child process for each:
+
+```text
+approved event + mode
+```
+
+Examples:
+
+```text
+NBA Finals Winner + paper
+NBA Finals Winner + live
+Election Winner + paper
+```
+
+Paper and live state therefore remain separate even for the same event.
+
+The browser may close without stopping those workers. Workers stop only when:
+
+- The user explicitly stops the session.
+- The application is shut down.
+- A worker fails.
+- The global emergency stop terminates live sessions.
+
+## Persistence
+
+### Control database
+
+Stored at:
+
+```text
+live_trading/data/control/control.sqlite3
+```
+
+It contains:
+
+- Catalog snapshots.
+- Scan jobs.
+- Candidate events.
+- LLM judgments.
+- Approved watchlist entries.
+- Paper/live configurations.
+- Worker state and heartbeats.
+- Backtest jobs and result metadata.
+- Presets.
+- Activity records.
+- Offline intervals.
+
+### Execution journals
+
+Each event runtime stores authoritative execution records beneath:
+
+```text
+live_trading/data/<event-slug>/
+```
+
+These records cover:
+
+- Client order IDs.
+- Order transitions.
+- Fills.
+- Open positions.
+- Reconciliation state.
+- Runtime display snapshots.
+- Captured L2 data.
+
+### Offline intervals
+
+Application shutdown and startup boundaries are persisted. Charts should leave
+those periods blank rather than connecting missing market data.
+
+## UI Updates And Performance Isolation
+
+The API provides one local WebSocket endpoint for scanner, worker, event,
+balance, order, fill, PnL, alert, and backtest updates.
+
+The current Next.js client uses TanStack Query to refresh REST resources every
+three seconds. The WebSocket event hub is implemented on the backend but is not
+yet wired into the React query cache.
+
+Backend WebSocket queues and runtime display channels are bounded and lossy:
+
+- Slow browser clients may miss intermediate display snapshots.
+- The newest coherent state is retained.
+- Market processing does not wait for React rendering.
+- Order submission does not wait for WebSocket clients.
+
+The execution journals and L2 captures remain the audit records.
+
+## Safety Model
+
+### Approval safety
+
+- Automatic matching cannot authorize trading.
+- LLM review cannot authorize trading.
+- Human approval remains mandatory.
+- A changed event mapping requires a new approval version.
+
+### Live-order safety
+
+- Live mode requires exact `LIVE` confirmation.
+- The user sees balances, positions, orders, budget, and warnings first.
+- Missing credentials block activation.
+- Reconciliation failure blocks activation.
+- A persistent emergency stop blocks new live workers.
+- Explicit stop cancels known resting live orders through runtime shutdown.
+
+### Data safety
+
+- Secrets remain in ignored `.env` files.
+- Secret values are never returned to the UI.
+- Sequence gaps and reconnects invalidate captured datasets.
+- Incomplete historical data cannot produce a backtest.
+- Automated tests do not send real orders.
+
+### Financial and venue caveats
+
+- A theoretical complete basket removes event-direction risk, but operational
+  risks remain: mismatched settlement rules, partial fills, venue failure,
+  unavailable balances, API faults, fees, and queue position.
+- International Polymarket backtests are not venue-faithful Polymarket US
+  backtests.
+- This software is engineering and research tooling, not financial advice.
+
+## Configuration
+
+Credentials belong in the repository root `.env`:
+
+```text
+KALSHI_API_KEY_ID=
+KALSHI_PRIVATE_KEY_PATH=
+KALSHI_PRIVATE_KEY_PEM=
+
+POLYMARKET_US_KEY_ID=
+POLYMARKET_US_SECRET_KEY=
+
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5-mini
+```
+
+Use either `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY_PEM`.
+
+Important optional runtime settings:
+
+```text
+KALSHI_API_BASE=https://external-api.kalshi.com/trade-api/v2
+KALSHI_WS_URL=wss://api.elections.kalshi.com/trade-api/ws/v2
+POLYMARKET_US_GATEWAY_BASE=https://gateway.polymarket.us
+POLYMARKET_US_API_BASE=https://api.polymarket.us
+POLYMARKET_US_WS_URL=wss://api.polymarket.us/v1/ws/markets
+
+DISCOVERY_REFRESH_SECONDS=600
+STALE_AFTER_SECONDS=5
+MAX_MATCHES=100
+MIN_MATCH_CONFIDENCE=0.74
+TRADE_SIZE=100
+LIVE_TRADING_DATA_DIR=live_trading/data
+```
+
+Strategy presets and advanced settings can be managed from **Settings** in the
+web application.
+
+## Local Commands
+
+### Start in the foreground
 
 ```powershell
-cd C:\Users\alexa\Documents\CompSci\prediction_markets_arb
+.\start.ps1
 ```
 
-Validate configured API credentials without placing orders:
+The terminal remains attached. `Ctrl+C` runs the graceful stop path.
+
+### Start detached
 
 ```powershell
-python -m live_trading doctor --categories sports --timeout-seconds 6
+.\start.ps1 -Detach
 ```
 
-Render a fake dashboard without live credentials:
+### Start without opening a browser
 
 ```powershell
-python -m live_trading sample-tui
+.\start.ps1 -SkipBrowser
 ```
 
-Run the read-only live scanner:
+### Stop
 
 ```powershell
-python -m live_trading run --categories sports,politics --max-matches 500 --metrics-out live_trading/data/metrics.json
+.\stop.ps1
 ```
 
-Run local synthetic performance benchmarks:
+### Direct Python diagnostics
 
 ```powershell
-python -m live_trading benchmark --pairs 100,250,500 --profiles steady,burst,stress --duration-seconds 60 --out live_trading/data/benchmarks/local.json
+.\.venv\Scripts\python.exe -m live_trading doctor --categories sports --timeout-seconds 8
 ```
 
-For full setup, credential configuration, module details, storage policy, benchmark interpretation, and contributor guidance, see [live_trading/README.md](live_trading/README.md).
+### Strategy benchmark
 
-## Safety And Access Notes
+```powershell
+.\.venv\Scripts\python.exe -m live_trading strategy-benchmark --iterations 10000
+```
 
-- This repository is research and engineering tooling, not financial advice.
-- The live package is deliberately read-only.
-- Contract equivalence must be reviewed carefully before any future trading logic is enabled.
-- From the United States, future automated execution should use legally available venue APIs such as Kalshi and Polymarket US.
-- The international Polymarket CLOB should not be used to bypass geographic restrictions.
-- API keys and private keys belong in ignored `.env` files and must never be committed.
+### Generate frontend API types
 
-## Recommended Reading Order
+With the local application running:
 
-For a new contributor:
+```powershell
+cd web
+npm run generate:api
+```
 
-1. Read this file for the project purpose and repository map.
-2. Read [live_trading/README.md](live_trading/README.md) for the live scanner architecture and operating guide.
-3. Read [historical_testing/README.md](historical_testing/README.md) for the historical research methodology and findings.
-4. Start in `live_trading/src/live_trading/main.py` to follow the live runtime orchestration.
-5. Continue into `live_trading/src/live_trading/engine.py`, `registry.py`, and the venue adapters to understand the performance-sensitive path.
+## Testing
 
-## Near-Term Roadmap
+Run Python tests:
 
-1. Improve structured market matching, especially for sports league/team/date fields.
-2. Run longer local live-data soaks and analyze opportunity duration, depth, freshness, and reconnect behavior.
-3. Improve historical analysis and document findings.
-4. Add paper-trading fill simulation.
-5. Design live execution separately, with strict risk controls, maximum unhedged exposure, kill switches, and careful legal/API review.
+```powershell
+.\.venv\Scripts\python.exe -m pytest live_trading/tests backtesting/tests -q
+```
+
+Run the frontend safety tests:
+
+```powershell
+cd web
+npm test
+```
+
+Build the production frontend:
+
+```powershell
+cd web
+npm run build
+```
+
+Audit production dependencies:
+
+```powershell
+cd web
+npm audit --omit=dev
+```
+
+Current verified baseline:
+
+- 35 Python tests passing.
+- Frontend live-activation safety test passing.
+- Next.js production build passing.
+- Production npm audit reporting zero vulnerabilities.
+- Complete `start.ps1` and `stop.ps1` lifecycle passing.
+
+## Current Limitations
+
+- Automated event discovery requires working venue catalog APIs and OpenAI
+  structured matching.
+- The scanner's current-edge rank uses read-only L2 snapshots; continuous
+  updates begin after an approved event has an active runtime.
+- Live private fill handling currently includes REST reconciliation; richer
+  private fill-stream integration should precede materially larger live size.
+- Historical replay uses international Polymarket until enough complete
+  Polymarket US L2 has been captured.
+- Backtesting simulates the supplied strategy; it does not optimize parameters
+  or select the best event automatically.
+- Settlement retrieval remains dependent on available venue state and captured
+  event records.
+
+## Documentation Policy
+
+`README.md` at the repository root is the only README and the authoritative
+description of the current system.
+
+Other Markdown files have narrower purposes:
+
+- [`docs/strategy.md`](docs/strategy.md) preserves the original imported
+  strategy design.
+- `historical_testing/*.md` contains research results and methodology reports.
+
+When architecture or operating behavior changes, update this README with the
+code change so package-level documentation does not drift again.
