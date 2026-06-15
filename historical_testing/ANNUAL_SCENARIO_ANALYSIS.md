@@ -15,7 +15,7 @@ There are two international evidence layers. They answer different questions:
 | Layer | Plain-English meaning | What it can prove |
 |---|---|---|
 | Annual official API proxy | Historical Kalshi and international Polymarket prices across the requested rolling year | Whether a price gap survives modeled fees and `1`, `2`, or `5` cents of assumed pair slippage. It cannot prove historical displayed depth. |
-| PMXT archive inventory | `259` synchronized raw archive hours were discovered and verified | Which hours are eligible for executable replay. Inventory alone is not a profit result. |
+| PMXT archive inventory | `410` synchronized raw archive hours were discovered and verified | Which hours are eligible for executable replay. Inventory alone is not a profit result. |
 | PMXT archived L2 replay | Stored multi-level order books for `1` replayed hours in this result file | Whether both visible books supported a requested order size after walking deeper prices. This is stronger executable evidence. |
 
 The requested annual window is `2025-05-31T00:00:00Z` through `2026-05-31T00:00:00Z`. The oldest Kalshi close time reached so far is `2025-05-29T18:03:18.736056+00:00`. Full requested Kalshi history reached: `True`.
@@ -24,8 +24,8 @@ The requested annual window is `2025-05-31T00:00:00Z` through `2026-05-31T00:00:
 
 The annual Kalshi historical cursor traversal and the combined two-venue profitability study are different things. The Kalshi historical traversal can be complete even when a public catalog endpoint on either venue still contains more rows than the configured retained-page cap.
 
-- Combined international catalog scope: `bounded_retained_screen_due_explicit_public_catalog_caps`.
-- Explicitly capped catalog slices: `2026-01: Polymarket; 2026-02: Polymarket; 2026-03: Polymarket; 2026-04: Polymarket; 2026-05: Kalshi and Polymarket`.
+- Combined international catalog scope: `all_reached_public_catalog_slices_complete`.
+- Explicitly capped catalog slices: `none recorded`.
 - Annual price-proxy scan scope: `all_retained_strict_pairs`.
 
 When a slice is capped, the report describes the retained screen honestly. It does not claim that every possible cross-venue pair or profitable signal from that slice was exhaustively tested.
@@ -56,26 +56,64 @@ This table ranks categories by the best positive retained net edge. A larger edg
 
 | Rank | Category | Annual positive proxy rows | PMXT positive 100-contract windows | Best retained net profit per contract |
 |---:|---|---:|---:|---:|
-| 1 | Culture | 1192 | 0 | $0.664211 |
-| 2 | Golf | 100014 | 0 | $0.654530 |
-| 3 | Politics | 2328 | 0 | $0.567300 |
-| 4 | Elections | 1149 | 88 | $0.534281 |
-| 5 | Additional Discovered Scenario Coverage | 926 | 0 | $0.461801 |
-| 6 | NBA | 0 | 0 | n/a |
-| 7 | MLB | 0 | 0 | n/a |
-| 8 | ATP | 0 | 0 | n/a |
-| 9 | WTA | 0 | 0 | n/a |
-| 10 | eSports | 0 | 0 | n/a |
-| 11 | IPL | 0 | 0 | n/a |
-| 12 | WNBA | 0 | 0 | n/a |
-| 13 | NHL | 0 | 0 | n/a |
-| 14 | ITF Men | 0 | 0 | n/a |
-| 15 | ITF Women | 0 | 0 | n/a |
-| 16 | UFC | 0 | 0 | n/a |
-| 17 | FIFA World Cup | 0 | 0 | n/a |
-| 18 | Weather | 0 | 0 | n/a |
-| 19 | MLS | 0 | 0 | n/a |
-| 20 | F1 | 0 | 0 | n/a |
+
+## Official Category Ranking
+
+The `blended score` is not dollars. First, each category is ranked by annual modeled portfolio profit and converted to a percentile from `0` to `100`. The same is done for executable PMXT portfolio profit. The final score is `0.70 × annual percentile + 0.30 × PMXT percentile`. A category absent from PMXT receives a neutral PMXT percentile of `50` and is labeled unvalidated.
+
+| Rank | Category | Blended score | Annual percentile | Annual profit | Annual ROI | PMXT percentile | PMXT profit | Validation |
+|---:|---|---:|---:|---:|---:|---:|---:|---|
+| 1 | `golf` | 85.00 | 100.00 | $1341.983974 | 26.84% | 50.00 | $0.000000 | Not L2 validated |
+| 2 | `f1` | 71.00 | 80.00 | $598.874083 | 11.98% | 50.00 | $0.000000 | Not L2 validated |
+| 3 | `elections` | 58.00 | 40.00 | $8.060508 | 0.16% | 100.00 | $78.304350 | L2 validated |
+| 4 | `mlb` | 57.00 | 60.00 | $255.559971 | 5.11% | 50.00 | $0.000000 | Not L2 validated |
+| 5 | `esports` | 29.00 | 20.00 | $3.382675 | 0.07% | 50.00 | $0.000000 | Not L2 validated |
+| 6 | `nba` | 15.00 | 0.00 | $2.656553 | 0.05% | 50.00 | $0.000000 | Not L2 validated |
+
+## Detailed Subscenario Ranking
+
+Each row combines category, competition stage, tournament or session level when applicable, market type, and entry timing. This is where NBA playoffs can be compared directly with NBA regular season, ATP Grand Slams, MLB postseason markets, and other specific situations.
+
+| Rank | Subscenario | Score | Annual profit | PMXT profit | Validation |
+|---:|---|---:|---:|---:|---|
+| 1 | `golf | final_or_championship | future_or_winner | sports_pregame_slow` | 85.00 | $1294.393057 | $0.000000 | Not L2 validated |
+| 2 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | moneyline_or_binary | sports_in_play` | 80.88 | $585.044760 | $0.000000 | Not L2 validated |
+| 3 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | moneyline_or_binary | sports_pregame_slow` | 76.76 | $572.073380 | $0.000000 | Not L2 validated |
+| 4 | `golf | final_or_championship | future_or_winner | sports_pregame_final_24h` | 72.65 | $433.098600 | $0.000000 | Not L2 validated |
+| 5 | `mlb | regular_season_or_unspecified | future_or_winner | sports_in_play` | 68.53 | $250.106279 | $0.000000 | Not L2 validated |
+| 6 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | moneyline_or_binary | sports_pregame_final_24h` | 64.41 | $231.861855 | $0.000000 | Not L2 validated |
+| 7 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | future_or_winner | sports_in_play` | 60.29 | $197.481881 | $0.000000 | Not L2 validated |
+| 8 | `golf | regular_season_or_unspecified | future_or_winner | sports_event_start_unavailable_final_24h` | 56.18 | $47.484771 | $0.000000 | Not L2 validated |
+| 9 | `mlb | regular_season_or_unspecified | future_or_winner | sports_pregame_slow` | 52.06 | $31.491350 | $0.000000 | Not L2 validated |
+| 10 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | future_or_winner | sports_pregame_slow` | 47.94 | $25.887103 | $0.000000 | Not L2 validated |
+| 11 | `golf | final_or_championship | future_or_winner | sports_event_start_unavailable_final_24h` | 43.82 | $22.473412 | $0.000000 | Not L2 validated |
+| 12 | `elections | regular_season_or_unspecified | moneyline_or_binary | lifecycle_final_24h` | 39.71 | $8.060508 | $0.000000 | Not L2 validated |
+| 13 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | future_or_winner | sports_pregame_final_24h` | 35.59 | $3.712140 | $0.000000 | Not L2 validated |
+| 14 | `esports | regular_season_or_unspecified | future_or_winner | sports_pregame_slow` | 31.47 | $3.382675 | $0.000000 | Not L2 validated |
+| 15 | `elections | regular_season_or_unspecified | future_or_winner | lifecycle_more_than_30d` | 30.00 | $0.000000 | $78.304350 | L2 validated |
+| 16 | `nba | regular_season_or_unspecified | future_or_winner | sports_in_play` | 27.35 | $2.656553 | $0.000000 | Not L2 validated |
+| 17 | `golf | regular_season_or_unspecified | future_or_winner | sports_pregame_slow` | 23.24 | $2.028889 | $0.000000 | Not L2 validated |
+| 18 | `f1 | regular_season_or_unspecified | race_or_f1_unspecified | future_or_winner | sports_event_start_unavailable_final_24h` | 19.12 | $0.913600 | $0.000000 | Not L2 validated |
+| 1 | MLB | 780 | 0 | $0.512075 |
+| 2 | Golf | 199 | 0 | $0.475300 |
+| 3 | F1 | 632 | 0 | $0.466300 |
+| 4 | Elections | 56 | 88 | $0.135475 |
+| 5 | eSports | 8 | 0 | $0.016725 |
+| 6 | NBA | 8 | 0 | $0.012651 |
+| 7 | ATP | 0 | 0 | n/a |
+| 8 | WTA | 0 | 0 | n/a |
+| 9 | IPL | 0 | 0 | n/a |
+| 10 | WNBA | 0 | 0 | n/a |
+| 11 | NHL | 0 | 0 | n/a |
+| 12 | ITF Men | 0 | 0 | n/a |
+| 13 | ITF Women | 0 | 0 | n/a |
+| 14 | UFC | 0 | 0 | n/a |
+| 15 | FIFA World Cup | 0 | 0 | n/a |
+| 16 | Politics | 0 | 0 | n/a |
+| 17 | Weather | 0 | 0 | n/a |
+| 18 | MLS | 0 | 0 | n/a |
+| 19 | Culture | 0 | 0 | n/a |
+| 20 | Additional Discovered Scenario Coverage | 0 | 0 | n/a |
 
 ## Broad Scenario Breakdown
 
@@ -83,20 +121,21 @@ The requested focus categories are useful for navigation, but the uncapped run a
 
 | Broad scenario | Strict pairs scanned | Pairs with synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `entertainment` | 75 | 65 | 1192 | 417 | $0.664211 |
-| `sports_golf` | 768 | 767 | 100014 | 26046 | $0.654530 |
-| `politics_other` | 13 | 11 | 2328 | 635 | $0.567300 |
-| `politics_elections` | 115 | 103 | 1149 | 490 | $0.534281 |
-| `other` | 45 | 12 | 675 | 157 | $0.461801 |
-| `sports_chess` | 3 | 3 | 251 | 90 | $0.424100 |
+| `sports_baseball` | 14 | 12 | 780 | 409 | $0.512075 |
+| `sports_golf` | 5 | 5 | 199 | 91 | $0.475300 |
+| `sports_motorsport` | 13 | 13 | 632 | 256 | $0.466300 |
+| `politics_elections` | 11 | 11 | 56 | 22 | $0.056411 |
+| `sports_soccer` | 3 | 3 | 8 | 6 | $0.016725 |
+| `sports_basketball` | 8 | 5 | 8 | 6 | $0.012651 |
+| `other` | 10 | 0 | 0 | 0 | n/a |
 
 ## Current Comparison
 
-`Culture` currently ranks first in the retained evidence because its best positive row has `$0.664211` of net profit per paired contract after the modeled costs. It contributes `1192` annual proxy rows and `0` archived PMXT 100-contract windows.
+`MLB` currently ranks first in the retained evidence because its best positive row has `$0.512075` of net profit per paired contract after the modeled costs. It contributes `780` annual proxy rows and `0` archived PMXT 100-contract windows.
 
 A PMXT archived-L2 result is stronger than a proxy-only result because it includes visible order-book quantity. A proxy-only category can still be worth investigating, but it needs later depth validation before the report treats it as executable historical evidence.
 
-`Golf` ranks next with a best retained net profit of `$0.654530` per paired contract.
+`Golf` ranks next with a best retained net profit of `$0.475300` per paired contract.
 
 ## How To Interpret Differences
 
@@ -116,15 +155,46 @@ A slower market can still be attractive when venues disagree for longer. Longer 
 
 **Why it could underperform:** In-play windows can vanish quickly, and popular games may be efficiently priced.
 
-**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `8` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
+**Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `131901` Kalshi retained catalog rows and `38211` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `136175` Kalshi retained catalog rows and `53466` international Polymarket retained catalog rows were classified here; `10` strict equivalent pairs recovered; `10` pairs selected for the annual scanner; `5` pairs produced synchronized historical price snapshots; `6765` synchronized snapshots aligned; `4` matched pairs produced a positive proxy window.
 
-No profitable example found.
+**Best retained example:** `Suns vs. Celtics` with `$0.002651` locked net profit per paired contract.
 
-This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
+**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
+
+**Observed positive subcategory counts:**
+
+| Positive subcategory label | Retained evidence rows |
+|---|---:|
+| `annual proxy phase: sports_in_play` | 8 |
+
+**Timing-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `sports_in_play` | 5 | 2259 | 8 | 6 | $0.012651 |
+| `sports_pregame_final_24h` | 8 | 4107 | 0 | 0 | n/a |
+| `sports_pregame_slow` | 8 | 399 | 0 | 0 | n/a |
+
+**Market-type comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `future_or_winner` | 8 | 6765 | 8 | 6 | $0.012651 |
+
+**Competition-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `regular_season_or_unspecified` | 8 | 6765 | 8 | 6 | $0.012651 |
+
+**Profitable examples:**
+
+- `2026-03-17T02:01:00+00:00`: buy YES on `kalshi` at `$0.970000` and NO on `polymarket` at `$0.005000` for `100` paired contracts. Pair cost per contract `$0.975000`; total entry fees for the order `$0.234875`; locked net profit `$0.002651` per paired contract; ROI `0.27%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-03-17T02:01:00+00:00`: buy YES on `polymarket` at `$0.005000` and NO on `kalshi` at `$0.970000` for `100` paired contracts. Pair cost per contract `$0.975000`; total entry fees for the order `$0.234875`; locked net profit `$0.002651` per paired contract; ROI `0.27%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### MLB
 
@@ -136,15 +206,48 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Props can have thin books, and superficially similar run-line or inning rules may not match.
 
-**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `780` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
+**Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `133099` Kalshi retained catalog rows and `8709` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `158572` Kalshi retained catalog rows and `18768` international Polymarket retained catalog rows were classified here; `14` strict equivalent pairs recovered; `14` pairs selected for the annual scanner; `12` pairs produced synchronized historical price snapshots; `13434` synchronized snapshots aligned; `10` matched pairs produced a positive proxy window.
 
-No profitable example found.
+**Best retained example:** `Athletics vs. Baltimore Orioles` with `$0.502075` locked net profit per paired contract.
 
-This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
+**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
+
+**Observed positive subcategory counts:**
+
+| Positive subcategory label | Retained evidence rows |
+|---|---:|
+| `annual proxy phase: sports_in_play` | 759 |
+| `annual proxy phase: sports_pregame_slow` | 21 |
+
+**Timing-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `sports_in_play` | 12 | 4920 | 759 | 401 | $0.512075 |
+| `sports_pregame_final_24h` | 14 | 7344 | 0 | 0 | n/a |
+| `sports_pregame_slow` | 14 | 1170 | 21 | 8 | $0.050245 |
+
+**Market-type comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `future_or_winner` | 14 | 13434 | 780 | 409 | $0.512075 |
+
+**Competition-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `regular_season_or_unspecified` | 14 | 13434 | 780 | 409 | $0.512075 |
+
+**Profitable examples:**
+
+- `2026-05-09T01:53:00+00:00`: buy YES on `polymarket` at `$0.000500` and NO on `kalshi` at `$0.460000` for `100` paired contracts. Pair cost per contract `$0.460500`; total entry fees for the order `$1.742499`; locked net profit `$0.502075` per paired contract; ROI `100.83%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-09T01:53:00+00:00`: buy YES on `kalshi` at `$0.460000` and NO on `polymarket` at `$0.000500` for `100` paired contracts. Pair cost per contract `$0.460500`; total entry fees for the order `$1.742499`; locked net profit `$0.502075` per paired contract; ROI `100.83%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-10T03:31:00+00:00`: buy YES on `kalshi` at `$0.490000` and NO on `polymarket` at `$0.000500` for `100` paired contracts. Pair cost per contract `$0.490500`; total entry fees for the order `$1.752499`; locked net profit `$0.471975` per paired contract; ROI `89.38%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### Golf
 
@@ -156,13 +259,13 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Round, cut, tie, and dead-heat wording can differ across venues.
 
-**Retained profitable evidence:** `100014` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `199` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
 **Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `26124` Kalshi retained catalog rows and `4554` international Polymarket retained catalog rows were classified here; `769` strict equivalent pairs recovered; `769` pairs selected for the annual scanner; `767` pairs produced synchronized historical price snapshots; `417183` synchronized snapshots aligned; `710` matched pairs produced a positive proxy window.
+**Coverage funnel:** `27270` Kalshi retained catalog rows and `5666` international Polymarket retained catalog rows were classified here; `10` strict equivalent pairs recovered; `10` pairs selected for the annual scanner; `5` pairs produced synchronized historical price snapshots; `1860` synchronized snapshots aligned; `5` matched pairs produced a positive proxy window.
 
-**Best retained example:** `Will Justin Rose win the 2025 FedEx St. Jude Championship?` with `$0.654530` locked net profit per paired contract.
+**Best retained example:** `Will Michael Kim win the 2026 PGA Championship?` with `$0.465300` locked net profit per paired contract.
 
 **Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
 
@@ -170,34 +273,36 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 | Positive subcategory label | Retained evidence rows |
 |---|---:|
-| `annual proxy phase: sports_pregame_slow` | 69734 |
-| `annual proxy phase: sports_event_start_unavailable_final_24h` | 30280 |
+| `annual proxy phase: sports_event_start_unavailable_final_24h` | 110 |
+| `annual proxy phase: sports_pregame_slow` | 86 |
+| `annual proxy phase: sports_pregame_final_24h` | 3 |
 
 **Timing-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `sports_event_start_unavailable_final_24h` | 763 | 218937 | 30280 | 15356 | $0.654530 |
-| `sports_pregame_slow` | 758 | 198246 | 69734 | 10690 | $0.467800 |
+| `sports_event_start_unavailable_final_24h` | 3 | 1248 | 110 | 63 | $0.219925 |
+| `sports_pregame_final_24h` | 2 | 3 | 3 | 3 | $0.474200 |
+| `sports_pregame_slow` | 5 | 609 | 86 | 25 | $0.475300 |
 
 **Market-type comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `future_or_winner` | 768 | 417183 | 100014 | 26046 | $0.654530 |
+| `future_or_winner` | 5 | 1860 | 199 | 91 | $0.475300 |
 
 **Competition-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `final_or_championship` | 382 | 208563 | 48040 | 10670 | $0.654530 |
-| `regular_season_or_unspecified` | 386 | 208620 | 51974 | 15376 | $0.466800 |
+| `final_or_championship` | 3 | 1119 | 72 | 40 | $0.475300 |
+| `regular_season_or_unspecified` | 2 | 741 | 127 | 51 | $0.219925 |
 
 **Profitable examples:**
 
-- `2025-08-10T22:55:00+00:00`: buy YES on `polymarket` at `$0.314000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.324000`; total entry fees for the order `$1.147020`; locked net profit `$0.654530` per paired contract; ROI `189.46%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-08-10T22:55:00+00:00`: buy YES on `kalshi` at `$0.010000` and NO on `polymarket` at `$0.358500` for `100` paired contracts. Pair cost per contract `$0.368500`; total entry fees for the order `$1.219889`; locked net profit `$0.609301` per paired contract; ROI `155.95%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-08-03T02:55:00+00:00`: buy YES on `kalshi` at `$0.010000` and NO on `polymarket` at `$0.498500` for `100` paired contracts. Pair cost per contract `$0.508500`; total entry fees for the order `$1.319989`; locked net profit `$0.468300` per paired contract; ROI `88.08%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-11T17:00:00+00:00`: buy YES on `kalshi` at `$0.002000` and NO on `polymarket` at `$0.500000` for `100` paired contracts. Pair cost per contract `$0.502000`; total entry fees for the order `$1.270000`; locked net profit `$0.465300` per paired contract; ROI `87.02%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-11T17:00:00+00:00`: buy YES on `kalshi` at `$0.003000` and NO on `polymarket` at `$0.500000` for `100` paired contracts. Pair cost per contract `$0.503000`; total entry fees for the order `$1.280000`; locked net profit `$0.464200` per paired contract; ROI `86.64%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-12T02:00:00+00:00`: buy YES on `kalshi` at `$0.002000` and NO on `polymarket` at `$0.505000` for `100` paired contracts. Pair cost per contract `$0.507000`; total entry fees for the order `$1.269875`; locked net profit `$0.460301` per paired contract; ROI `85.29%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### ATP
 
@@ -213,7 +318,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `23649` Kalshi retained catalog rows and `27824` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `24349` Kalshi retained catalog rows and `41387` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -233,7 +338,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `9195` Kalshi retained catalog rows and `17344` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `9840` Kalshi retained catalog rows and `23873` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -249,15 +354,44 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Different map, series, and overtime rules can make apparently similar contracts non-equivalent.
 
-**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `8` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
+**Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `9155` Kalshi retained catalog rows and `32618` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `10005` Kalshi retained catalog rows and `65743` international Polymarket retained catalog rows were classified here; `3` strict equivalent pairs recovered; `3` pairs selected for the annual scanner; `3` pairs produced synchronized historical price snapshots; `1977` synchronized snapshots aligned; `2` matched pairs produced a positive proxy window.
 
-No profitable example found.
+**Best retained example:** `Will Alireza Firouzja win the 2025 Chess Esports World Cup?` with `$0.006725` locked net profit per paired contract.
 
-This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
+**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
+
+**Observed positive subcategory counts:**
+
+| Positive subcategory label | Retained evidence rows |
+|---|---:|
+| `annual proxy phase: sports_pregame_slow` | 8 |
+
+**Timing-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `sports_event_start_unavailable_final_24h` | 3 | 603 | 0 | 0 | n/a |
+| `sports_pregame_slow` | 3 | 1374 | 8 | 6 | $0.016725 |
+
+**Market-type comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `future_or_winner` | 3 | 1977 | 8 | 6 | $0.016725 |
+
+**Competition-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `regular_season_or_unspecified` | 3 | 1977 | 8 | 6 | $0.016725 |
+
+**Profitable examples:**
+
+- `2025-07-29T18:00:00+00:00`: buy YES on `kalshi` at `$0.110000` and NO on `polymarket` at `$0.850000` for `100` paired contracts. Pair cost per contract `$0.960000`; total entry fees for the order `$1.327500`; locked net profit `$0.006725` per paired contract; ROI `0.68%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### IPL
 
@@ -273,7 +407,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `1699` Kalshi retained catalog rows and `10280` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `1931` Kalshi retained catalog rows and `22935` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -293,7 +427,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `3768` Kalshi retained catalog rows and `505` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `3824` Kalshi retained catalog rows and `847` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -313,7 +447,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `124244` Kalshi retained catalog rows and `6464` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `126281` Kalshi retained catalog rows and `7406` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -333,7 +467,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `6462` Kalshi retained catalog rows and `0` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `7896` Kalshi retained catalog rows and `937` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -353,7 +487,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `5656` Kalshi retained catalog rows and `0` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `7406` Kalshi retained catalog rows and `1084` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -373,7 +507,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `5238` Kalshi retained catalog rows and `4667` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `5638` Kalshi retained catalog rows and `5531` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -393,7 +527,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `2535` Kalshi retained catalog rows and `3034` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `2604` Kalshi retained catalog rows and `5449` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -409,47 +543,15 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Office, candidate, cutoff date, and settlement-source wording often differ subtly.
 
-**Retained profitable evidence:** `2328` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `profitable_price_proxy_window_found`.
+**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `5073` Kalshi retained catalog rows and `3998` international Polymarket retained catalog rows were classified here; `16` strict equivalent pairs recovered; `16` pairs selected for the annual scanner; `11` pairs produced synchronized historical price snapshots; `5049` synchronized snapshots aligned; `11` matched pairs produced a positive proxy window.
+**Coverage funnel:** `5239` Kalshi retained catalog rows and `5405` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
-**Best retained example:** `Will Keir Starmer say "Tax" at the next Prime Minister's Questions?` with `$0.567300` locked net profit per paired contract.
+No profitable example found.
 
-**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
-
-**Observed positive subcategory counts:**
-
-| Positive subcategory label | Retained evidence rows |
-|---|---:|
-| `annual proxy phase: lifecycle_final_24h` | 1976 |
-| `annual proxy phase: lifecycle_30d_to_24h` | 352 |
-
-**Timing-phase comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `lifecycle_30d_to_24h` | 14 | 567 | 352 | 115 | $0.365111 |
-| `lifecycle_final_24h` | 14 | 4482 | 1976 | 520 | $0.567300 |
-
-**Market-type comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `moneyline_or_binary` | 14 | 5049 | 2328 | 635 | $0.567300 |
-
-**Competition-phase comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `regular_season_or_unspecified` | 14 | 5049 | 2328 | 635 | $0.567300 |
-
-**Profitable examples:**
-
-- `2026-01-14T12:05:00+00:00`: buy YES on `polymarket` at `$0.400000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.410000`; total entry fees for the order `$1.270000`; locked net profit `$0.567300` per paired contract; ROI `131.11%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2026-01-14T12:05:00+00:00`: buy YES on `polymarket` at `$0.470000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.480000`; total entry fees for the order `$1.315500`; locked net profit `$0.496845` per paired contract; ROI `98.75%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2026-01-14T12:30:00+00:00`: buy YES on `polymarket` at `$0.470000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.480000`; total entry fees for the order `$1.315500`; locked net profit `$0.496845` per paired contract; ROI `98.75%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
 
 ### Weather
 
@@ -465,7 +567,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `45884` Kalshi retained catalog rows and `26673` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `50866` Kalshi retained catalog rows and `56636` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -485,7 +587,7 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `2684` Kalshi retained catalog rows and `4913` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `2864` Kalshi retained catalog rows and `7443` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 No profitable example found.
 
@@ -501,13 +603,13 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** District, nominee, cutoff date, and official settlement source require manual review.
 
-**Retained profitable evidence:** `1149` annual price-proxy rows and `88` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `56` annual price-proxy rows and `88` archived PMXT 100-contract opportunity windows.
 
 **Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `3367` Kalshi retained catalog rows and `90043` international Polymarket retained catalog rows were classified here; `114` strict equivalent pairs recovered; `114` pairs selected for the annual scanner; `103` pairs produced synchronized historical price snapshots; `21435` synchronized snapshots aligned; `35` matched pairs produced a positive proxy window.
+**Coverage funnel:** `3547` Kalshi retained catalog rows and `141914` international Polymarket retained catalog rows were classified here; `11` strict equivalent pairs recovered; `11` pairs selected for the annual scanner; `11` pairs produced synchronized historical price snapshots; `1563` synchronized snapshots aligned; `3` matched pairs produced a positive proxy window.
 
-**Best retained example:** `Will Donna Miller be the Democratic Nominee for IL-02?` with `$0.534281` locked net profit per paired contract.
+**Best retained example:** `Argentina Presidential Election Winner - Will Javier Milei win the 2027 Argentina presidential election?` with `$0.135475` locked net profit per paired contract.
 
 **Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
 
@@ -515,36 +617,34 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 | Positive subcategory label | Retained evidence rows |
 |---|---:|
-| `annual proxy phase: lifecycle_final_24h` | 1149 |
 | `PMXT timing phase: lifecycle_more_than_30d` | 88 |
 | `PMXT market type: future_or_winner` | 88 |
 | `PMXT competition phase: regular_season_or_unspecified` | 88 |
+| `annual proxy phase: lifecycle_final_24h` | 56 |
 
 **Timing-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `lifecycle_final_24h` | 114 | 21435 | 1149 | 490 | $0.534281 |
-| `lifecycle_more_than_30d` | 2 | 0 | 0 | 0 | n/a |
+| `lifecycle_final_24h` | 11 | 1563 | 56 | 22 | $0.056411 |
 
 **Market-type comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `future_or_winner` | 6 | 0 | 0 | 0 | n/a |
-| `moneyline_or_binary` | 108 | 21435 | 1149 | 490 | $0.534281 |
+| `moneyline_or_binary` | 11 | 1563 | 56 | 22 | $0.056411 |
 
 **Competition-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `regular_season_or_unspecified` | 114 | 21435 | 1149 | 490 | $0.534281 |
+| `regular_season_or_unspecified` | 11 | 1563 | 56 | 22 | $0.056411 |
 
 **Profitable examples:**
 
-- `2026-05-23T07:15:48.744000+00:00`: buy YES on `polymarket` at `$0.445474` and NO on `kalshi` at `$0.390000` for `100` paired contracts. Pair cost per contract `$0.835474`; total entry fees for the order `$2.905135`; locked net profit `$0.135475` per paired contract; ROI `15.67%`. Evidence: `pmxt_archived_l2_strict_candidate_pending_manual_rule_review`.
-- `2026-03-18T00:25:00+00:00`: buy YES on `polymarket` at `$0.175000` and NO on `kalshi` at `$0.260000` for `100` paired contracts. Pair cost per contract `$0.435000`; total entry fees for the order `$2.071875`; locked net profit `$0.534281` per paired contract; ROI `114.72%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2026-03-18T00:25:00+00:00`: buy YES on `kalshi` at `$0.250000` and NO on `polymarket` at `$0.290000` for `100` paired contracts. Pair cost per contract `$0.540000`; total entry fees for the order `$2.349500`; locked net profit `$0.426505` per paired contract; ROI `74.37%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-23T07:15:48.744000+00:00`: buy YES on `polymarket` at `$0.445474` and NO on `kalshi` at `$0.390000` for `100` paired contracts. Pair cost per contract `$0.835474`; total entry fees for the order `$2.905135`; locked net profit `$0.135475` per paired contract; ROI `15.67%`. Evidence: `pmxt_archived_l2_exact_pair`.
+- `2026-05-05T22:35:00+00:00`: buy YES on `kalshi` at `$0.890000` and NO on `polymarket` at `$0.035000` for `100` paired contracts. Pair cost per contract `$0.925000`; total entry fees for the order `$0.858875`; locked net profit `$0.046411` per paired contract; ROI `4.87%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-05-05T16:10:00+00:00`: buy YES on `polymarket` at `$0.019500` and NO on `kalshi` at `$0.950000` for `100` paired contracts. Pair cost per contract `$0.969500`; total entry fees for the order `$0.435599`; locked net profit `$0.006144` per paired contract; ROI `0.62%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### Culture
 
@@ -556,46 +656,15 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Sparse liquidity and wording differences can make a large proxy edge less executable.
 
-**Retained profitable evidence:** `1192` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `profitable_price_proxy_window_found`.
+**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
 
-**Coverage funnel:** `9594` Kalshi retained catalog rows and `15130` international Polymarket retained catalog rows were classified here; `75` strict equivalent pairs recovered; `75` pairs selected for the annual scanner; `65` pairs produced synchronized historical price snapshots; `19923` synchronized snapshots aligned; `19` matched pairs produced a positive proxy window.
+**Coverage funnel:** `10158` Kalshi retained catalog rows and `25326` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
-**Best retained example:** `Will Bulgaria win the televote for Eurovision 2026?` with `$0.664211` locked net profit per paired contract.
+No profitable example found.
 
-**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
-
-**Observed positive subcategory counts:**
-
-| Positive subcategory label | Retained evidence rows |
-|---|---:|
-| `annual proxy phase: lifecycle_final_24h` | 1192 |
-
-**Timing-phase comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `lifecycle_final_24h` | 75 | 19923 | 1192 | 417 | $0.664211 |
-
-**Market-type comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `future_or_winner` | 70 | 16527 | 140 | 94 | $0.664211 |
-| `moneyline_or_binary` | 5 | 3396 | 1052 | 323 | $0.516925 |
-
-**Competition-phase comparison:**
-
-| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
-|---|---:|---:|---:|---:|---:|
-| `regular_season_or_unspecified` | 75 | 19923 | 1192 | 417 | $0.664211 |
-
-**Profitable examples:**
-
-- `2026-05-16T22:55:00+00:00`: buy YES on `polymarket` at `$0.304500` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.314500`; total entry fees for the order `$1.128899`; locked net profit `$0.664211` per paired contract; ROI `197.81%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-12-07T05:40:00+00:00`: buy YES on `kalshi` at `$0.010000` and NO on `polymarket` at `$0.450000` for `100` paired contracts. Pair cost per contract `$0.460000`; total entry fees for the order `$1.307500`; locked net profit `$0.516925` per paired contract; ROI `107.01%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-12-07T05:40:00+00:00`: buy YES on `polymarket` at `$0.495000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.505000`; total entry fees for the order `$1.319875`; locked net profit `$0.471801` per paired contract; ROI `89.32%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
 
 ### F1
 
@@ -607,15 +676,52 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Placement, constructor, tie, and race-classification rules can differ.
 
-**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `632` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `no_strict_equivalent_cross_venue_pair_recovered`.
+**Annual coverage status:** `profitable_price_proxy_window_found`.
 
-**Coverage funnel:** `1807` Kalshi retained catalog rows and `3124` international Polymarket retained catalog rows were classified here; `0` strict equivalent pairs recovered; `0` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
+**Coverage funnel:** `2018` Kalshi retained catalog rows and `3124` international Polymarket retained catalog rows were classified here; `13` strict equivalent pairs recovered; `13` pairs selected for the annual scanner; `13` pairs produced synchronized historical price snapshots; `7596` synchronized snapshots aligned; `11` matched pairs produced a positive proxy window.
 
-No profitable example found.
+**Best retained example:** `Will Lewis Hamilton achieve the fastest lap at the 2025 F1 Qatar Grand Prix?` with `$0.456300` locked net profit per paired contract.
 
-This is not a claim that the category was unprofitable. The retained catalogs did not produce a strictly equivalent Kalshi-versus-Polymarket contract pair, so the arbitrage arithmetic could not be run.
+**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
+
+**Observed positive subcategory counts:**
+
+| Positive subcategory label | Retained evidence rows |
+|---|---:|
+| `annual proxy phase: sports_pregame_slow` | 388 |
+| `annual proxy phase: sports_pregame_final_24h` | 132 |
+| `annual proxy phase: sports_in_play` | 102 |
+| `annual proxy phase: sports_event_start_unavailable_final_24h` | 10 |
+
+**Timing-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `sports_event_start_unavailable_final_24h` | 5 | 2217 | 10 | 9 | $0.011827 |
+| `sports_in_play` | 8 | 657 | 102 | 72 | $0.466300 |
+| `sports_pregame_final_24h` | 8 | 2781 | 132 | 62 | $0.324600 |
+| `sports_pregame_slow` | 11 | 1941 | 388 | 113 | $0.439801 |
+
+**Market-type comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `future_or_winner` | 7 | 4689 | 117 | 33 | $0.293331 |
+| `moneyline_or_binary` | 6 | 2907 | 515 | 223 | $0.466300 |
+
+**Competition-phase comparison:**
+
+| Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
+|---|---:|---:|---:|---:|---:|
+| `regular_season_or_unspecified` | 13 | 7596 | 632 | 256 | $0.466300 |
+
+**Profitable examples:**
+
+- `2025-11-30T20:26:00+00:00`: buy YES on `kalshi` at `$0.010000` and NO on `polymarket` at `$0.500500` for `100` paired contracts. Pair cost per contract `$0.510500`; total entry fees for the order `$1.319999`; locked net profit `$0.456300` per paired contract; ROI `83.92%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2025-11-29T20:20:00+00:00`: buy YES on `kalshi` at `$0.010000` and NO on `polymarket` at `$0.505500` for `100` paired contracts. Pair cost per contract `$0.515500`; total entry fees for the order `$1.319849`; locked net profit `$0.451302` per paired contract; ROI `82.25%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+- `2026-03-11T13:00:00+00:00`: buy YES on `kalshi` at `$0.040000` and NO on `polymarket` at `$0.495000` for `100` paired contracts. Pair cost per contract `$0.535000`; total entry fees for the order `$1.519875`; locked net profit `$0.429801` per paired contract; ROI `75.38%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
 
 ### Additional Discovered Scenario Coverage
 
@@ -627,52 +733,33 @@ This is not a claim that the category was unprofitable. The retained catalogs di
 
 **Why it could underperform:** Because it combines different market families, each standout needs its own interpretation.
 
-**Retained profitable evidence:** `926` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
+**Retained profitable evidence:** `0` annual price-proxy rows and `0` archived PMXT 100-contract opportunity windows.
 
-**Annual coverage status:** `profitable_price_proxy_window_found`.
+**Annual coverage status:** `strict_pairs_scanned_but_no_synchronized_price_snapshots_available`.
 
-**Coverage funnel:** `745116` Kalshi retained catalog rows and `405263` international Polymarket retained catalog rows were classified here; `48` strict equivalent pairs recovered; `48` pairs selected for the annual scanner; `15` pairs produced synchronized historical price snapshots; `8025` synchronized snapshots aligned; `8` matched pairs produced a positive proxy window.
-
-**Best retained example:** `Will Zohran Mamdani say "Grocery" during his victory/concession speech?` with `$0.461801` locked net profit per paired contract.
-
-**Why this category may be useful:** the retained positive result shows that at least one equivalent-looking cross-venue pair survived the modeled costs. The strength of the conclusion depends on the evidence label below: archived PMXT L2 rows include visible book capacity, while annual proxy rows are broader screens that still need depth validation.
-
-**Observed positive subcategory counts:**
-
-| Positive subcategory label | Retained evidence rows |
-|---|---:|
-| `annual proxy phase: lifecycle_final_24h` | 664 |
-| `annual proxy phase: sports_pregame_slow` | 247 |
-| `annual proxy phase: lifecycle_30d_to_24h` | 11 |
-| `annual proxy phase: sports_event_start_unavailable_final_24h` | 4 |
+**Coverage funnel:** `756066` Kalshi retained catalog rows and `662079` international Polymarket retained catalog rows were classified here; `10` strict equivalent pairs recovered; `10` pairs selected for the annual scanner; `0` pairs produced synchronized historical price snapshots; `0` synchronized snapshots aligned; `0` matched pairs produced a positive proxy window.
 
 **Timing-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `lifecycle_30d_to_24h` | 3 | 36 | 11 | 5 | $0.066120 |
-| `lifecycle_final_24h` | 45 | 5316 | 664 | 152 | $0.461801 |
-| `sports_event_start_unavailable_final_24h` | 3 | 1584 | 4 | 3 | $0.018191 |
-| `sports_pregame_slow` | 3 | 1089 | 247 | 87 | $0.424100 |
+| `lifecycle_final_24h` | 10 | 0 | 0 | 0 | n/a |
 
 **Market-type comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `future_or_winner` | 12 | 6477 | 308 | 123 | $0.424100 |
-| `moneyline_or_binary` | 36 | 1548 | 618 | 124 | $0.461801 |
+| `moneyline_or_binary` | 10 | 0 | 0 | 0 | n/a |
 
 **Competition-phase comparison:**
 
 | Subcategory | Strict pairs | Synchronized snapshots | Positive proxy snapshots | Positive windows | Best net edge |
 |---|---:|---:|---:|---:|---:|
-| `regular_season_or_unspecified` | 48 | 8025 | 926 | 247 | $0.461801 |
+| `regular_season_or_unspecified` | 10 | 0 | 0 | 0 | n/a |
 
-**Profitable examples:**
+No profitable example found.
 
-- `2025-11-05T04:30:00+00:00`: buy YES on `polymarket` at `$0.505000` and NO on `kalshi` at `$0.010000` for `100` paired contracts. Pair cost per contract `$0.515000`; total entry fees for the order `$1.319875`; locked net profit `$0.461801` per paired contract; ROI `85.80%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-12-02T23:00:00+00:00`: buy YES on `kalshi` at `$0.050000` and NO on `polymarket` at `$0.500000` for `100` paired contracts. Pair cost per contract `$0.550000`; total entry fees for the order `$1.590000`; locked net profit `$0.424100` per paired contract; ROI `73.64%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
-- `2025-12-02T23:00:00+00:00`: buy YES on `kalshi` at `$0.050000` and NO on `polymarket` at `$0.500000` for `100` paired contracts. Pair cost per contract `$0.550000`; total entry fees for the order `$1.590000`; locked net profit `$0.424100` per paired contract; ROI `73.64%`. Evidence: `official_api_price_history_proxy_without_historical_depth`.
+Equivalent-looking pairs reached the scanner, but the official histories did not produce prices aligned to the same timestamps on both venues. The missing example is a data-availability result, not proof of no opportunity.
 
 ## Important Limits
 
