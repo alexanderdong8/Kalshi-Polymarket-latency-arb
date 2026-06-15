@@ -9,6 +9,10 @@ historical_testing/data/polymarket_us_public_catalog.json
 historical_testing/data/*.pkl
 historical_testing/data/*.pkl.tmp
 live_trading/data/
+.app/
+web/.next/
+web/node_modules/
+web/coverage/
 backtesting/runs/
 trade_system/logs/
 trade_system/secrets/

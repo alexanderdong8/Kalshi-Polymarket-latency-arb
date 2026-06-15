@@ -45,6 +45,8 @@ class RuntimeOptions:
     dashboard: bool = True
     dashboard_port: int = 8080
     data_dir: Path = Path("live_trading/data")
+    live_confirmed: bool = False
+    strategy_settings: dict[str, Any] | None = None
 
 
 class RuntimeState:
@@ -102,11 +104,17 @@ async def run_manifest_runtime(options: RuntimeOptions) -> None:
     for payload in journal.open_positions():
         await position_store.add(_open_basket_from_payload(payload))
     fee_cfg = FeeConfig.default()
+    strategy = options.strategy_settings or {}
     abort_event = asyncio.Event()
 
     if options.mode == "live":
         order_client = LiveOrderClient(settings, journal)
-        await _confirm_live_start(manifest, options.capital, order_client)
+        await _confirm_live_start(
+            manifest,
+            options.capital,
+            order_client,
+            interactive=not options.live_confirmed,
+        )
     else:
         # Capital is split into venue wallets. The executor's aggregate cap remains
         # the user-specified amount, so no basket may commit more than that limit.
@@ -119,9 +127,15 @@ async def run_manifest_runtime(options: RuntimeOptions) -> None:
 
     detector = Detector(
         event=manifest.event,
-        target_size=Decimal(str(settings.trade_size)),
+        target_size=Decimal(str(strategy.get("trade_size", settings.trade_size))),
         fee_cfg=fee_cfg,
-        staleness_ms=float(settings.stale_after_seconds * Decimal("1000")),
+        entry_threshold=Decimal(str(strategy.get("entry_threshold", "0.98"))),
+        slippage_buffer_per_share=Decimal(str(strategy.get("slippage_buffer", "0.005"))),
+        depth_haircut=Decimal(str(strategy.get("depth_haircut", "0.7"))),
+        staleness_ms=float(strategy.get("staleness_ms", settings.stale_after_seconds * Decimal("1000"))),
+        min_non_widening_ticks=int(strategy.get("min_non_widening_ticks", 2)),
+        min_leg_bid=Decimal(str(strategy.get("min_leg_bid", "0.02"))),
+        max_leg_bid=Decimal(str(strategy.get("max_leg_bid", "0.98"))),
     )
     latest_evaluation: BasketEvaluation | None = None
     attempts: list[BasketAttempt] = []
@@ -158,6 +172,10 @@ async def run_manifest_runtime(options: RuntimeOptions) -> None:
         exec_cfg=ExecConfig(
             max_capital_per_trade=options.capital,
             min_capital_per_trade=min(Decimal("10"), options.capital),
+            retry_seconds=float(strategy.get("retry_seconds", 2)),
+            max_unhedged_loss_pct=Decimal(
+                str(strategy.get("max_unhedged_loss_pct", "0.05"))
+            ),
         ),
         entry_threshold=detector.entry_threshold,
         slippage_buffer_per_share=detector.slippage_buffer_per_share,
@@ -170,7 +188,11 @@ async def run_manifest_runtime(options: RuntimeOptions) -> None:
         order_client=order_client,
         position_store=position_store,
         fee_cfg=fee_cfg,
-        cfg=ExitConfig(),
+        cfg=ExitConfig(
+            required_margin_per_share=Decimal(str(strategy.get("exit_margin", "0.01"))),
+            min_leg_bid=Decimal(str(strategy.get("min_leg_bid", "0.02"))),
+            max_leg_bid=Decimal(str(strategy.get("max_leg_bid", "0.98"))),
+        ),
         on_exit_attempt=on_exit,
     )
 
@@ -289,6 +311,8 @@ async def _confirm_live_start(
     manifest: EventManifest,
     capital: Decimal,
     client: LiveOrderClient,
+    *,
+    interactive: bool = True,
 ) -> None:
     preview = await client.reconcile()
     print("\nLIVE MONEY STARTUP PREVIEW")
@@ -301,9 +325,10 @@ async def _confirm_live_start(
     print(f"Locally journaled open baskets: {len(preview['local_open_positions'])}")
     print(f"Kalshi reported positions: {len(preview['kalshi_positions'])}")
     print(f"Polymarket US reported positions: {len(preview['polymarket_us_positions'])}")
-    confirmation = await asyncio.to_thread(input, 'Type "LIVE" to enable real orders: ')
-    if confirmation.strip() != "LIVE":
-        raise RuntimeError("Live startup cancelled; confirmation did not match LIVE.")
+    if interactive:
+        confirmation = await asyncio.to_thread(input, 'Type "LIVE" to enable real orders: ')
+        if confirmation.strip() != "LIVE":
+            raise RuntimeError("Live startup cancelled; confirmation did not match LIVE.")
 
 
 async def _cancel_resting_orders(order_client: Any) -> None:

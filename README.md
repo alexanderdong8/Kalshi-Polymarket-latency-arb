@@ -2,6 +2,26 @@
 
 This repository investigates whether equivalent prediction-market contracts can trade at different prices on Kalshi and Polymarket, and whether those temporary price differences can support a practical cross-venue arbitrage strategy.
 
+## Local Application
+
+The primary interface is a local Next.js application backed by FastAPI and the
+existing Python strategy engine.
+
+```powershell
+.\start.ps1
+```
+
+The application opens at `http://127.0.0.1:3000`. Stop it cleanly with
+`.\stop.ps1`.
+
+Use **Discover** to refresh both venue catalogs, automatically match complete
+events, review settlement equivalence, and approve a versioned event. Approved
+events appear in **My Markets**, where paper, live, and backtest modes can be
+configured independently.
+
+Architecture and safety decisions are documented in
+[`docs/LOCAL_APPLICATION_ARCHITECTURE.md`](docs/LOCAL_APPLICATION_ARCHITECTURE.md).
+
 The project has two complementary parts:
 
 1. **Historical research** asks whether these opportunities appeared in past order books often enough to justify further work.

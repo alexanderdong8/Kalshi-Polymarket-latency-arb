@@ -89,6 +89,32 @@ class KalshiClient:
                 url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params | {'cursor': cursor})}"
         return markets[:limit]
 
+    async def fetch_book(self, ticker: str, depth: int = 100) -> BookState:
+        url = (
+            f"{self.settings.kalshi_api_base.rstrip('/')}/markets/"
+            f"{ticker}/orderbook?depth={depth}"
+        )
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                resp.raise_for_status()
+                payload = await resp.json()
+        raw = payload.get("orderbook") or payload
+        return KalshiOrderBook(ticker).apply_snapshot(
+            {
+                "msg": {
+                    "market_ticker": ticker,
+                    "yes_dollars_fp": raw.get("yes_dollars_fp")
+                    or raw.get("yes_dollars")
+                    or raw.get("yes")
+                    or [],
+                    "no_dollars_fp": raw.get("no_dollars_fp")
+                    or raw.get("no_dollars")
+                    or raw.get("no")
+                    or [],
+                }
+            }
+        )
+
     async def stream_orderbooks(
         self,
         tickers: list[str],

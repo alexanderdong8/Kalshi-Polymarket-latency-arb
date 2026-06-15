@@ -10,12 +10,15 @@ requires-python = ">=3.10"
 dependencies = [
   "aiohttp>=3.9",
   "cryptography>=42.0",
+  "fastapi>=0.115",
+  "openai>=1.68",
   "python-dotenv>=1.0",
   "psutil>=5.9",
   "nicegui>=2.0,<3",
   "plotly>=5.20",
   "pyyaml>=6.0",
   "rich>=13.7",
+  "uvicorn[standard]>=0.30",
   "websockets>=14.0",
 ]
 
@@ -24,6 +27,7 @@ test = ["pytest>=8.0"]
 
 [project.scripts]
 live-trading = "live_trading.main:main"
+prediction-markets-api = "live_trading.control.app:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from contextlib import suppress
 from dataclasses import asdict
 from decimal import Decimal
@@ -39,6 +40,8 @@ def main() -> None:
     run.add_argument("--capital", type=Decimal, default=Decimal("0"))
     run.add_argument("--dashboard", action=argparse.BooleanOptionalAction, default=True)
     run.add_argument("--dashboard-port", type=int, default=8080)
+    run.add_argument("--confirmed-live", action="store_true", help=argparse.SUPPRESS)
+    run.add_argument("--strategy-json", default=None, help=argparse.SUPPRESS)
     run.add_argument("--categories", default="sports,politics,crypto,economics")
     run.add_argument("--max-matches", type=int, default=None)
     run.add_argument("--metrics-out", default=None)
@@ -103,6 +106,8 @@ async def run_live(args: argparse.Namespace) -> None:
                 capital=args.capital,
                 dashboard=args.dashboard,
                 dashboard_port=args.dashboard_port,
+                live_confirmed=args.confirmed_live,
+                strategy_settings=json.loads(args.strategy_json) if args.strategy_json else None,
             )
         )
         return
