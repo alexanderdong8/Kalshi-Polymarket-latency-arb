@@ -108,6 +108,7 @@ class ControlDatabase:
             "catalog_snapshots",
             "scan_jobs",
             "candidates",
+            "basket_entries",
             "watchlist",
             "configurations",
             "workers",

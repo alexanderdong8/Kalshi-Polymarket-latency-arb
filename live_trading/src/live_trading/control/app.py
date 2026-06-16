@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
@@ -22,6 +23,8 @@ from .manifests import write_manifest
 from .scanner import MarketScanner
 from .schemas import (
     ApprovalRequest,
+    BasketAddRequest,
+    BasketEntry,
     BacktestJob,
     BacktestRequest,
     Candidate,
@@ -66,6 +69,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         db.close_latest_offline_interval(utc_now())
+        scanner.recover_abandoned_jobs()
         _install_presets(db)
         await supervisor.start()
         try:
@@ -136,6 +140,64 @@ def create_app(
             limit=limit,
             lookback_days=lookback_days,
         )
+
+    @app.get("/api/basket", response_model=list[BasketEntry])
+    async def basket() -> list[BasketEntry]:
+        return [BasketEntry.model_validate(row) for row in db.list("basket_entries")]
+
+    @app.post("/api/basket", response_model=BasketEntry)
+    async def add_basket_entry(request: BasketAddRequest) -> BasketEntry:
+        suggestion = request.suggestion
+        for payload in db.list("basket_entries"):
+            existing = BasketEntry.model_validate(payload)
+            if existing.suggestion_id == suggestion.id:
+                return existing
+        timestamp = datetime.now(timezone.utc)
+        entry = BasketEntry(
+            id=uuid_like("basket", suggestion.id),
+            suggestion_id=suggestion.id,
+            name=suggestion.name,
+            category=suggestion.category,
+            close_time=suggestion.close_time,
+            outcome_count=suggestion.outcome_count,
+            mapping_confidence=suggestion.mapping_confidence,
+            kalshi_outcomes=suggestion.kalshi_outcomes,
+            polymarket_outcomes=suggestion.polymarket_outcomes,
+            warnings=suggestion.warnings,
+            source=suggestion.source,
+            venues=suggestion.venues,
+            provider_event_ids=suggestion.provider_event_ids,
+            provider_series_ids=suggestion.provider_series_ids,
+            primary_exchange=suggestion.primary_exchange,
+            total_volume=suggestion.total_volume,
+            total_liquidity=suggestion.total_liquidity,
+            added_at=timestamp,
+            updated_at=timestamp,
+        )
+        db.put("basket_entries", entry.id, entry.model_dump(mode="json"))
+        db.append_event("basket.added", entry.model_dump(mode="json"))
+        await hub.publish("basket.updated", entry.model_dump(mode="json"))
+        return entry
+
+    @app.delete("/api/basket/{basket_id}")
+    async def remove_basket_entry(basket_id: str) -> dict[str, str]:
+        _get_or_404(db, "basket_entries", basket_id)
+        db.delete("basket_entries", basket_id)
+        await hub.publish("basket.removed", {"id": basket_id})
+        return {"status": "removed"}
+
+    @app.post("/api/basket/{basket_id}/prepare-review", response_model=BasketEntry)
+    async def prepare_basket_entry(basket_id: str) -> BasketEntry:
+        entry = BasketEntry.model_validate(_get_or_404(db, "basket_entries", basket_id))
+        return await scanner.prepare_basket_entry(entry)
+
+    @app.post("/api/basket/prepare-review", response_model=list[BasketEntry])
+    async def prepare_basket_entries() -> list[BasketEntry]:
+        entries = [BasketEntry.model_validate(row) for row in db.list("basket_entries")]
+        result = []
+        for entry in entries:
+            result.append(await scanner.prepare_basket_entry(entry))
+        return result
 
     @app.get("/api/candidates", response_model=list[Candidate])
     async def candidates(
@@ -458,6 +520,10 @@ def _get_or_404(db: ControlDatabase, table: str, key: str) -> dict[str, Any]:
     if payload is None:
         raise HTTPException(404, f"{table.rstrip('s').replace('_', ' ')} not found.")
     return payload
+
+
+def uuid_like(prefix: str, value: str) -> str:
+    return f"{prefix}_{hashlib.sha1(value.encode()).hexdigest()[:16]}"
 
 
 def _slug(value: str) -> str:

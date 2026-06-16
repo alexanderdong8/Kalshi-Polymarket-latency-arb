@@ -98,6 +98,46 @@ class PolymarketUSClient:
                 params["offset"] = int(params["offset"]) + int(params["limit"])
         return markets[:limit]
 
+    async def fetch_event_markets(self, identifier: str, *, title: str | None = None) -> list[VenueMarket]:
+        identifier = identifier.strip()
+        if not identifier and not title:
+            return []
+        params: dict[str, Any] = {
+            "active": "true",
+            "closed": "false",
+            "limit": 500,
+            "offset": 0,
+        }
+        wanted = identifier.casefold()
+        title_wanted = (title or identifier).casefold().strip()
+        async with aiohttp.ClientSession() as session:
+            for _page in range(30):
+                url = f"{self.settings.polymarket_gateway_base.rstrip('/')}/v1/events?{urlencode(params)}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    resp.raise_for_status()
+                    payload = await resp.json()
+                rows = list(payload.get("events") or [])
+                for raw in rows:
+                    values = {
+                        str(raw.get("id") or "").casefold(),
+                        str(raw.get("ticker") or "").casefold(),
+                        str(raw.get("slug") or "").casefold(),
+                    }
+                    event_title = str(raw.get("title") or raw.get("description") or "").casefold()
+                    if (
+                        (wanted and wanted in values)
+                        or (title_wanted and event_title == title_wanted)
+                    ):
+                        return [
+                            variant
+                            for market in raw.get("markets") or []
+                            for variant in market_variants_from_api(market)
+                        ]
+                if len(rows) < int(params["limit"]):
+                    break
+                params["offset"] = int(params["offset"]) + int(params["limit"])
+        return []
+
     async def fetch_book(self, slug: str) -> BookState:
         url = f"{self.settings.polymarket_gateway_base.rstrip('/')}/v1/markets/{slug}/book"
         async with aiohttp.ClientSession() as session:

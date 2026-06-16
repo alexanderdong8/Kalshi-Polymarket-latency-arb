@@ -80,6 +80,42 @@ class ScanJob(BaseModel):
     completed_at: datetime | None = None
 
 
+class BasketEntry(BaseModel):
+    id: str
+    suggestion_id: str
+    name: str
+    category: str | None = None
+    close_time: datetime | None = None
+    outcome_count: int = 0
+    mapping_confidence: float = 0
+    kalshi_outcomes: list[str] = Field(default_factory=list)
+    polymarket_outcomes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    source: str = "native"
+    venues: list[str] = Field(default_factory=list)
+    provider_event_ids: dict[str, str] = Field(default_factory=dict)
+    provider_series_ids: dict[str, str] = Field(default_factory=dict)
+    primary_exchange: str | None = None
+    total_volume: float | None = None
+    total_liquidity: float | None = None
+    status: Literal[
+        "selected",
+        "preparing",
+        "review_ready",
+        "needs_opposite_venue",
+        "incomplete_outcomes",
+        "llm_review_failed",
+        "rate_limited",
+        "no_tradable_match_found",
+        "failed",
+    ] = "selected"
+    status_reason: str | None = None
+    candidate_id: str | None = None
+    last_reviewed_at: datetime | None = None
+    added_at: datetime
+    updated_at: datetime
+
+
 class MarketSuggestion(BaseModel):
     id: str
     name: str
@@ -92,6 +128,15 @@ class MarketSuggestion(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     source: str = "native"
     venues: list[str] = Field(default_factory=list)
+    provider_event_ids: dict[str, str] = Field(default_factory=dict)
+    provider_series_ids: dict[str, str] = Field(default_factory=dict)
+    primary_exchange: str | None = None
+    total_volume: float | None = None
+    total_liquidity: float | None = None
+
+
+class BasketAddRequest(BaseModel):
+    suggestion: MarketSuggestion
 
 
 class ApprovalRequest(BaseModel):

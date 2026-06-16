@@ -90,6 +90,49 @@ class KalshiClient:
                 url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params | {'cursor': cursor})}"
         return markets[:limit]
 
+    async def fetch_event_markets(self, event_ticker: str, retries: int = 4) -> list[VenueMarket]:
+        event_ticker = event_ticker.strip()
+        if not event_ticker:
+            return []
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.settings.kalshi_api_base.rstrip('/')}/events/{event_ticker}"
+            payload = None
+            for attempt in range(retries):
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 404:
+                            return []
+                        if resp.status in {429, 500, 502, 503, 504} and attempt < retries - 1:
+                            await asyncio.sleep((1.5 * (attempt + 1)) + random.random())
+                            continue
+                        resp.raise_for_status()
+                        payload = await resp.json()
+                        break
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    if attempt >= retries - 1:
+                        raise
+                    await asyncio.sleep((1.5 * (attempt + 1)) + random.random())
+            if payload is None:
+                return []
+            rows = list(payload.get("markets") or [])
+            if not rows:
+                params = {"event_ticker": event_ticker, "limit": 1000}
+                url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params)}"
+                for attempt in range(retries):
+                    try:
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                            if resp.status in {429, 500, 502, 503, 504} and attempt < retries - 1:
+                                await asyncio.sleep((1.5 * (attempt + 1)) + random.random())
+                                continue
+                            resp.raise_for_status()
+                            rows = list((await resp.json()).get("markets") or [])
+                            break
+                    except (aiohttp.ClientError, asyncio.TimeoutError):
+                        if attempt >= retries - 1:
+                            raise
+                        await asyncio.sleep((1.5 * (attempt + 1)) + random.random())
+        return [market_from_api(row) for row in rows]
+
     async def fetch_book(self, ticker: str, depth: int = 100) -> BookState:
         url = (
             f"{self.settings.kalshi_api_base.rstrip('/')}/markets/"

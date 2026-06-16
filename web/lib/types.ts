@@ -71,10 +71,30 @@ export type MarketSuggestion = {
   warnings: string[];
   source: string;
   venues: string[];
+  provider_event_ids: Record<string, string>;
+  provider_series_ids: Record<string, string>;
+  primary_exchange?: string | null;
+  total_volume?: number | null;
+  total_liquidity?: number | null;
 };
 
-export type SelectedMarket = MarketSuggestion & {
+export type BasketEntry = MarketSuggestion & {
+  suggestion_id: string;
   added_at: string;
+  updated_at: string;
+  status:
+    | "selected"
+    | "preparing"
+    | "review_ready"
+    | "needs_opposite_venue"
+    | "incomplete_outcomes"
+    | "llm_review_failed"
+    | "rate_limited"
+    | "no_tradable_match_found"
+    | "failed";
+  status_reason?: string | null;
+  candidate_id?: string | null;
+  last_reviewed_at?: string | null;
 };
 
 export type VenueBalances = {

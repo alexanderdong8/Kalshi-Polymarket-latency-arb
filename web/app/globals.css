@@ -82,10 +82,19 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .basket-title h2 { margin: 0; font-size: 22px; }
 .basket-actions { display: flex; align-items: center; gap: 8px; }
 .basket-list { display: grid; }
-.basket-row { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(260px, 1fr) auto auto; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.basket-row { display: grid; grid-template-columns: minmax(260px, .85fr) minmax(280px, 1fr) minmax(150px, auto) auto auto; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .basket-row:last-child { border-bottom: 0; }
 .basket-row b { display: block; margin-bottom: 4px; }
 .basket-row small { color: var(--muted); font-size: 12px; }
+.basket-status { justify-self: start; max-width: 260px; border: 1px solid var(--line); background: #f5f2ea; color: #675f4f; padding: 7px 9px; font: 600 9px/1.35 var(--font-mono), monospace; text-transform: uppercase; }
+.basket-status.review_ready { color: var(--green); background: var(--green-pale); border-color: #bdd8c9; }
+.basket-status.preparing { color: var(--amber); background: #fff6e4; border-color: #dfbd82; }
+.basket-status.failed,
+.basket-status.rate_limited,
+.basket-status.incomplete_outcomes,
+.basket-status.needs_opposite_venue,
+.basket-status.no_tradable_match_found,
+.basket-status.llm_review_failed { color: var(--red); background: var(--red-pale); border-color: #e8c1bd; }
 .icon-button { width: 34px; height: 34px; border: 1px solid var(--line); background: transparent; display: grid; place-items: center; color: var(--muted); }
 .icon-button:hover { color: var(--red); border-color: #e4c1bd; background: var(--red-pale); }
 .scan-strip, .job-strip { border: 1px solid var(--line); border-top: 0; padding: 15px 18px; background: #eeece5; display: grid; grid-template-columns: minmax(210px, .8fr) minmax(220px, 1fr) auto; align-items: center; gap: 18px; }

@@ -107,6 +107,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/basket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Basket */
+        get: operations["basket_api_basket_get"];
+        put?: never;
+        /** Add Basket Entry */
+        post: operations["add_basket_entry_api_basket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/basket/{basket_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Basket Entry */
+        delete: operations["remove_basket_entry_api_basket__basket_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/basket/{basket_id}/prepare-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Basket Entry */
+        post: operations["prepare_basket_entry_api_basket__basket_id__prepare_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/basket/prepare-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Basket Entries */
+        post: operations["prepare_basket_entries_api_basket_prepare_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/candidates": {
         parameters: {
             query?: never;
@@ -511,6 +580,82 @@ export interface components {
             /** End Date */
             end_date?: string | null;
         };
+        /** BasketAddRequest */
+        BasketAddRequest: {
+            suggestion: components["schemas"]["MarketSuggestion"];
+        };
+        /** BasketEntry */
+        BasketEntry: {
+            /** Id */
+            id: string;
+            /** Suggestion Id */
+            suggestion_id: string;
+            /** Name */
+            name: string;
+            /** Category */
+            category?: string | null;
+            /** Close Time */
+            close_time?: string | null;
+            /**
+             * Outcome Count
+             * @default 0
+             */
+            outcome_count: number;
+            /**
+             * Mapping Confidence
+             * @default 0
+             */
+            mapping_confidence: number;
+            /** Kalshi Outcomes */
+            kalshi_outcomes?: string[];
+            /** Polymarket Outcomes */
+            polymarket_outcomes?: string[];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Source
+             * @default native
+             */
+            source: string;
+            /** Venues */
+            venues?: string[];
+            /** Provider Event Ids */
+            provider_event_ids?: {
+                [key: string]: string;
+            };
+            /** Provider Series Ids */
+            provider_series_ids?: {
+                [key: string]: string;
+            };
+            /** Primary Exchange */
+            primary_exchange?: string | null;
+            /** Total Volume */
+            total_volume?: number | null;
+            /** Total Liquidity */
+            total_liquidity?: number | null;
+            /**
+             * Status
+             * @default selected
+             * @enum {string}
+             */
+            status: "selected" | "preparing" | "review_ready" | "needs_opposite_venue" | "incomplete_outcomes" | "llm_review_failed" | "rate_limited" | "no_tradable_match_found" | "failed";
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Candidate Id */
+            candidate_id?: string | null;
+            /** Last Reviewed At */
+            last_reviewed_at?: string | null;
+            /**
+             * Added At
+             * Format: date-time
+             */
+            added_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** Candidate */
         Candidate: {
             /** Id */
@@ -611,6 +756,20 @@ export interface components {
             source: string;
             /** Venues */
             venues?: string[];
+            /** Provider Event Ids */
+            provider_event_ids?: {
+                [key: string]: string;
+            };
+            /** Provider Series Ids */
+            provider_series_ids?: {
+                [key: string]: string;
+            };
+            /** Primary Exchange */
+            primary_exchange?: string | null;
+            /** Total Volume */
+            total_volume?: number | null;
+            /** Total Liquidity */
+            total_liquidity?: number | null;
         };
         /** ModeConfiguration */
         ModeConfiguration: {
@@ -1135,6 +1294,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    basket_api_basket_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BasketEntry"][];
+                };
+            };
+        };
+    };
+    add_basket_entry_api_basket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketAddRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BasketEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_basket_entry_api_basket__basket_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                basket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_basket_entry_api_basket__basket_id__prepare_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                basket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BasketEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepare_basket_entries_api_basket_prepare_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BasketEntry"][];
                 };
             };
         };

@@ -12,6 +12,10 @@ from ..config import Settings
 from ..control.schemas import MarketSuggestion
 
 
+class OddpoolRateLimitError(RuntimeError):
+    pass
+
+
 class OddpoolClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -36,6 +40,34 @@ class OddpoolClient:
         )
         return [_suggestion(rows) for rows in groups[:limit]]
 
+    async def event_markets(self, event_id: str) -> list[dict[str, Any]]:
+        if not self.available:
+            return []
+        return await self._request_json(f"/search/events/{event_id}/markets")
+
+    async def search_markets(
+        self,
+        *,
+        query: str | None = None,
+        exchange: str | None = None,
+        series_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if not self.available:
+            return []
+        params: dict[str, str] = {
+            "status": "active",
+            "sort_by": "volume",
+            "limit": str(min(max(limit, 1), 100)),
+        }
+        if query:
+            params["q"] = query
+        if exchange:
+            params["exchange"] = exchange
+        if series_id:
+            params["series_id"] = series_id
+        return await self._request_json("/search/markets", params=params)
+
     async def _request_events(self, *, query: str, limit: int) -> list[dict[str, Any]]:
         params = {
             "q": query,
@@ -43,7 +75,12 @@ class OddpoolClient:
             "sort_by": "volume",
             "limit": str(min(max(limit, 1), 100)),
         }
-        url = f"{self.settings.oddpool_api_base.rstrip('/')}/search/events"
+        return await self._request_json("/search/events", params=params)
+
+    async def _request_json(
+        self, path: str, *, params: dict[str, str] | None = None
+    ) -> list[dict[str, Any]]:
+        url = f"{self.settings.oddpool_api_base.rstrip('/')}{path}"
         headers = {"X-API-Key": self.settings.oddpool_api_key or ""}
         async with aiohttp.ClientSession() as session:
             async with session.get(
@@ -52,6 +89,8 @@ class OddpoolClient:
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=6),
             ) as response:
+                if response.status == 429:
+                    raise OddpoolRateLimitError("Oddpool rate limit reached. Try again shortly.")
                 response.raise_for_status()
                 payload = await response.json()
         return _rows(payload)
@@ -80,6 +119,16 @@ def _suggestion(rows: list[dict[str, Any]]) -> MarketSuggestion:
     )
     event_id = str(row.get("event_id") or row.get("id") or row.get("slug") or name)
     venues = _venues(rows)
+    provider_event_ids = {
+        venue: str(event_id)
+        for item in rows
+        if (venue := _venue(item)) and (event_id := item.get("event_id") or item.get("id"))
+    }
+    provider_series_ids = {
+        venue: str(series_id)
+        for item in rows
+        if (venue := _venue(item)) and (series_id := item.get("series_id"))
+    }
     confidence = row.get("match_confidence") or row.get("confidence") or 0.9
     confidence_value = float(confidence)
     if confidence_value > 1:
@@ -111,6 +160,13 @@ def _suggestion(rows: list[dict[str, Any]]) -> MarketSuggestion:
         ],
         source="oddpool",
         venues=venues,
+        provider_event_ids=provider_event_ids,
+        provider_series_ids=provider_series_ids,
+        primary_exchange=_venue(row) or None,
+        total_volume=sum(float(item.get("total_volume") or item.get("volume") or 0) for item in rows),
+        total_liquidity=sum(
+            float(item.get("total_liquidity") or item.get("liquidity") or 0) for item in rows
+        ),
     )
 
 
