@@ -12,8 +12,10 @@ venue catalogs" for too long.
 
 Discover now has two paths:
 
-- Typeahead suggestions query recent cached venue catalogs and return event-level
-  Kalshi/Polymarket US matches while the user types.
+- Typeahead suggestions use Oddpool first when `ODDPOOL_API_KEY` is configured,
+  because it indexes prediction-market events across Kalshi and Polymarket.
+  Without Oddpool, suggestions fall back to recent cached venue catalogs and the
+  native matcher.
 - Scan Markets runs the deeper matcher, LLM review, and L2 ranking over tradable
   venue records from the last seven days by default.
 
@@ -23,8 +25,8 @@ concern, not a live Discover scan concern.
 
 ## Consequences
 
-- The first typeahead request may perform one quick recent-catalog refresh if no
-  fresh cache exists.
+- The first native typeahead fallback may perform one quick recent-catalog
+  refresh if no fresh cache exists.
 - Search suggestions are not approval records. A user still runs a scan and then
   reviews the LLM/deterministic result before approving an event.
 - Full catalog discovery can be added later as an explicit advanced scan mode,

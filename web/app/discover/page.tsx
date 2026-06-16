@@ -2,15 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, RefreshCw, Search, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { api, money, pct } from "@/lib/api";
-import type { Candidate, MarketSuggestion, ScanJob } from "@/lib/types";
+import type { Candidate, MarketSuggestion, ScanJob, SelectedMarket } from "@/lib/types";
 import { EmptyState, PageHead, Progress, StatusBadge } from "@/components/ui";
 
 export default function DiscoverPage() {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [activeScanName, setActiveScanName] = useState<string | null>(null);
+  const [basket, setBasket] = useState<SelectedMarket[]>(() => readDiscoveryBasket());
   const [selected, setSelected] = useState<Candidate | null>(null);
 
   useEffect(() => {
@@ -18,14 +20,10 @@ export default function DiscoverPage() {
     return () => window.clearTimeout(timer);
   }, [query]);
 
-  const candidates = useQuery({
-    queryKey: ["candidates", debouncedQuery],
-    queryFn: () =>
-      api<Candidate[]>(
-        `/candidates${debouncedQuery ? `?query=${encodeURIComponent(debouncedQuery)}` : ""}`,
-      ),
-    staleTime: 1000,
-  });
+  useEffect(() => {
+    window.localStorage.setItem("discovery-basket-v1", JSON.stringify(basket));
+  }, [basket]);
+
   const suggestions = useQuery({
     queryKey: ["market-suggestions", debouncedQuery],
     queryFn: () =>
@@ -39,9 +37,18 @@ export default function DiscoverPage() {
     queryKey: ["scans"],
     queryFn: () => api<ScanJob[]>("/scans"),
     refetchInterval: (queryState) => {
-      const current = queryState.state.data?.[0];
-      return current && ["queued", "refreshing", "matching", "reviewing"].includes(current.status) ? 1000 : false;
+      const active = queryState.state.data?.some((row) => ["queued", "refreshing", "matching", "reviewing"].includes(row.status));
+      return active ? 1000 : false;
     },
+  });
+  const activeScans = (scans.data ?? []).filter((row) => ["queued", "refreshing", "matching", "reviewing"].includes(row.status));
+  const currentScan = activeScans[0] ?? scans.data?.[0];
+  const scanActive = activeScans.length > 0;
+  const candidates = useQuery({
+    queryKey: ["candidates"],
+    queryFn: () => api<Candidate[]>("/candidates"),
+    staleTime: 1000,
+    refetchInterval: scanActive ? 1000 : false,
   });
   const scan = useMutation({
     mutationFn: (scanQuery?: string) =>
@@ -54,10 +61,49 @@ export default function DiscoverPage() {
           lookback_days: 7,
         }),
       }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["scans"] }),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["scans"] });
+      client.invalidateQueries({ queryKey: ["candidates"] });
+    },
+  });
+  const scanBasket = useMutation({
+    mutationFn: async (items: SelectedMarket[]) => {
+      await Promise.all(items.map((item) => startScan(item.name)));
+      return items.length;
+    },
+    onMutate: (items) => setActiveScanName(`${items.length} selected event${items.length === 1 ? "" : "s"}`),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["scans"] });
+      client.invalidateQueries({ queryKey: ["candidates"] });
+    },
   });
   const filtered = useMemo(() => candidates.data ?? [], [candidates.data]);
-  const currentScan = scans.data?.[0];
+
+  useEffect(() => {
+    if (currentScan?.status === "complete" || currentScan?.status === "failed") {
+      client.invalidateQueries({ queryKey: ["candidates"] });
+    }
+  }, [client, currentScan?.status]);
+
+  function scanForReview(name: string) {
+    setActiveScanName(name);
+    scan.mutate(name);
+  }
+
+  function addToBasket(item: MarketSuggestion) {
+    setBasket((current) => {
+      if (current.some((row) => row.id === item.id)) return current;
+      return [{ ...item, added_at: new Date().toISOString() }, ...current];
+    });
+  }
+
+  function removeFromBasket(id: string) {
+    setBasket((current) => current.filter((item) => item.id !== id));
+  }
+
+  function clearBasket() {
+    setBasket([]);
+  }
 
   return (
     <>
@@ -65,8 +111,8 @@ export default function DiscoverPage() {
         eyebrow="01 / Market intake"
         title="Search events on Kalshi and Polymarket"
         actions={
-          <button className="button primary" onClick={() => scan.mutate(query)} disabled={scan.isPending}>
-            <Sparkles size={16} /> {scan.isPending ? "Starting..." : "Scan markets"}
+          <button className="button primary" onClick={() => scanBasket.mutate(basket)} disabled={scanBasket.isPending || scan.isPending || basket.length === 0}>
+            <Sparkles size={16} /> {scanBasket.isPending ? "Scanning..." : "Scan basket"}
           </button>
         }
       />
@@ -78,7 +124,7 @@ export default function DiscoverPage() {
           placeholder="Search event, category, Kalshi ticker, or Polymarket slug"
           aria-label="Search markets"
         />
-        <span>{filtered.length} candidates</span>
+        <span>{basket.length} selected</span>
       </section>
       {debouncedQuery.length >= 2 ? (
         <section className="suggestion-panel">
@@ -92,25 +138,13 @@ export default function DiscoverPage() {
           {suggestions.data?.length ? (
             <div className="suggestion-list">
               {suggestions.data.map((item) => (
-                <button
-                  className="suggestion-row"
+                <SuggestionRow
                   key={item.id}
-                  onClick={() => {
-                    setQuery(item.name);
-                    scan.mutate(item.name);
-                  }}
-                >
-                  <span>
-                    <b>{item.name}</b>
-                    <small>
-                      {item.category ?? "Uncategorized"} · {item.outcome_count} mapped outcomes · {(item.mapping_confidence * 100).toFixed(0)}% match
-                      {item.source === "oddpool" ? " · Oddpool" : ""}
-                    </small>
-                  </span>
-                  <span className="suggestion-books">
-                    Kalshi: {item.kalshi_outcomes.join(" / ")} · Polymarket: {item.polymarket_outcomes.join(" / ")}
-                  </span>
-                </button>
+                  item={item}
+                  selected={basket.some((row) => row.id === item.id)}
+                  onAdd={() => addToBasket(item)}
+                  onRemove={() => removeFromBasket(item.id)}
+                />
               ))}
             </div>
           ) : (
@@ -120,15 +154,57 @@ export default function DiscoverPage() {
           )}
         </section>
       ) : null}
+      <section className="basket-panel">
+        <div className="basket-title">
+          <div>
+            <p className="eyebrow">Selected events</p>
+            <h2>Trading basket</h2>
+          </div>
+          <div className="basket-actions">
+            <button className="button ghost compact" onClick={clearBasket} disabled={!basket.length}>Clear</button>
+            <button className="button primary compact" onClick={() => scanBasket.mutate(basket)} disabled={!basket.length || scanBasket.isPending || scan.isPending}>
+              <Sparkles size={14} /> {scanBasket.isPending ? "Scanning..." : "Prepare review"}
+            </button>
+          </div>
+        </div>
+        {basket.length ? (
+          <div className="basket-list">
+            {basket.map((item) => (
+                <div
+                  className="basket-row"
+                  key={item.id}
+                >
+                  <span>
+                    <b>{item.name}</b>
+                    <small>
+                      {item.category ?? "Uncategorized"} · {item.outcome_count || "—"} markets · {(item.mapping_confidence * 100).toFixed(0)}% match · {item.source}
+                    </small>
+                  </span>
+                  <span className="suggestion-books">
+                    {item.venues.join(" + ") || "Venue match pending"} · Kalshi: {item.kalshi_outcomes.slice(0, 2).join(" / ") || "pending"} · Polymarket: {item.polymarket_outcomes.slice(0, 2).join(" / ") || "pending"}
+                  </span>
+                  <button className="button compact" onClick={() => scanForReview(item.name)} disabled={scan.isPending || scanBasket.isPending}>
+                    <Sparkles size={14} /> Scan
+                  </button>
+                  <button className="icon-button" onClick={() => removeFromBasket(item.id)} aria-label={`Remove ${item.name}`}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="suggestion-empty">Add events from search results. Nothing is scanned or refreshed until you choose Prepare review.</p>
+          )}
+      </section>
       {currentScan ? (
         <section className="scan-strip">
           <div>
             <RefreshCw size={15} className={["refreshing", "matching", "reviewing"].includes(currentScan.status) ? "spin" : ""} />
-            <strong>{currentScan.message}</strong>
+            <strong>{scanActive && activeScanName ? `Preparing ${activeScanName}` : currentScan.message}</strong>
             <StatusBadge value={currentScan.status} />
           </div>
           <Progress value={currentScan.progress} />
-          <small>{currentScan.candidate_count} candidates · recent tradable catalogs, 7-day lookback</small>
+          <small>{currentScan.candidate_count} review-ready candidates · {activeScans.length || 1} scan{(activeScans.length || 1) === 1 ? "" : "s"}</small>
         </section>
       ) : null}
       {filtered.length ? (
@@ -162,13 +238,64 @@ export default function DiscoverPage() {
           ))}
         </div>
       ) : (
-        <EmptyState title="No candidate events yet">
-          Run an explicit scan to refresh the complete Kalshi and Polymarket US catalogs. The scanner will not approve anything on its own.
+        <EmptyState title="No review-ready events yet">
+          Search for an event, then choose Scan for review. Approved events appear in My Markets.
         </EmptyState>
       )}
       {selected ? <ReviewDialog candidate={selected} onClose={() => setSelected(null)} /> : null}
     </>
   );
+}
+
+function SuggestionRow({
+  item,
+  selected,
+  onAdd,
+  onRemove,
+}: {
+  item: MarketSuggestion;
+  selected: boolean;
+  onAdd: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="suggestion-row">
+      <span>
+        <b>{item.name}</b>
+        <small>
+          {item.category ?? "Uncategorized"} · {item.outcome_count || "—"} markets · {(item.mapping_confidence * 100).toFixed(0)}% match · {item.source}
+        </small>
+      </span>
+      <span className="suggestion-books">
+        {item.venues.join(" + ") || "Venue match pending"} · Kalshi: {item.kalshi_outcomes.slice(0, 2).join(" / ") || "pending"} · Polymarket: {item.polymarket_outcomes.slice(0, 2).join(" / ") || "pending"}
+      </span>
+      <button className={selected ? "button compact ghost" : "button compact"} onClick={selected ? onRemove : onAdd}>
+        {selected ? <Check size={14} /> : <Plus size={14} />} {selected ? "Added" : "Add"}
+      </button>
+    </div>
+  );
+}
+
+function readDiscoveryBasket(): SelectedMarket[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("discovery-basket-v1") || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function startScan(scanQuery: string) {
+  return api<ScanJob>("/scans", {
+    method: "POST",
+    body: JSON.stringify({
+      query: scanQuery,
+      categories: [],
+      max_markets: 250,
+      lookback_days: 7,
+    }),
+  });
 }
 
 function ReviewDialog({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {

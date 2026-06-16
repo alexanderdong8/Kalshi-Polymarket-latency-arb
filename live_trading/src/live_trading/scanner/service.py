@@ -100,7 +100,25 @@ class ScannerService:
                 },
             )
             if not kalshi or not polymarket:
-                raise RuntimeError("; ".join(errors) or "One or both venue catalogs were empty.")
+                missing = []
+                if not kalshi:
+                    missing.append("Kalshi")
+                if not polymarket:
+                    missing.append("Polymarket US")
+                await self._update(
+                    job,
+                    status="complete",
+                    progress=1,
+                    message=(
+                        "No review-ready matches found because "
+                        + " and ".join(missing)
+                        + " returned no recent tradable catalog rows."
+                    ),
+                    candidate_count=0,
+                    errors=errors,
+                    completed_at=now(),
+                )
+                return
 
             await self._update(
                 job,
@@ -415,6 +433,7 @@ def _suggestion(pair: EventPair) -> MarketSuggestion:
         ],
         warnings=list(pair.warnings),
         source="native",
+        venues=["kalshi", "polymarket_us"],
     )
 
 

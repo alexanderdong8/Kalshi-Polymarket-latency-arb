@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import re
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
@@ -21,11 +23,25 @@ class OddpoolClient:
     async def search_events(self, query: str, *, limit: int = 8) -> list[MarketSuggestion]:
         if not self.available:
             return []
+        rows = await self._request_events(query=query, limit=limit * 3)
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            grouped[_group_key(row)].append(row)
+        groups = sorted(
+            grouped.values(),
+            key=lambda rows: (
+                len(_venues(rows)) < 2,
+                -sum(float(row.get("total_volume") or 0) for row in rows),
+            ),
+        )
+        return [_suggestion(rows) for rows in groups[:limit]]
+
+    async def _request_events(self, *, query: str, limit: int) -> list[dict[str, Any]]:
         params = {
             "q": query,
             "status": "active",
             "sort_by": "volume",
-            "limit": str(limit),
+            "limit": str(min(max(limit, 1), 100)),
         }
         url = f"{self.settings.oddpool_api_base.rstrip('/')}/search/events"
         headers = {"X-API-Key": self.settings.oddpool_api_key or ""}
@@ -38,8 +54,7 @@ class OddpoolClient:
             ) as response:
                 response.raise_for_status()
                 payload = await response.json()
-        rows = _rows(payload)
-        return [_suggestion(row) for row in rows[:limit]]
+        return _rows(payload)
 
 
 def _rows(payload: Any) -> list[dict[str, Any]]:
@@ -54,7 +69,8 @@ def _rows(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _suggestion(row: dict[str, Any]) -> MarketSuggestion:
+def _suggestion(rows: list[dict[str, Any]]) -> MarketSuggestion:
+    row = rows[0]
     name = str(
         row.get("title")
         or row.get("event_title")
@@ -63,10 +79,12 @@ def _suggestion(row: dict[str, Any]) -> MarketSuggestion:
         or "Untitled event"
     )
     event_id = str(row.get("event_id") or row.get("id") or row.get("slug") or name)
+    venues = _venues(rows)
     confidence = row.get("match_confidence") or row.get("confidence") or 0.9
     confidence_value = float(confidence)
     if confidence_value > 1:
         confidence_value = confidence_value / 100
+    confidence_value = confidence_value if len(venues) >= 2 else min(confidence_value, 0.65)
     return MarketSuggestion(
         id=hashlib.sha1(f"oddpool:{event_id}".encode()).hexdigest()[:16],
         name=name,
@@ -77,16 +95,35 @@ def _suggestion(row: dict[str, Any]) -> MarketSuggestion:
             or row.get("expiration_time")
             or row.get("ends_at")
         ),
-        outcome_count=int(row.get("outcome_count") or row.get("market_count") or 0),
+        outcome_count=max(
+            int(item.get("outcome_count") or item.get("market_count") or 0)
+            for item in rows
+        ),
         mapping_confidence=min(1.0, max(0.0, confidence_value)),
-        kalshi_outcomes=_outcomes(row, "kalshi"),
-        polymarket_outcomes=_outcomes(row, "polymarket"),
-        warnings=["Oddpool cross-venue search result. Run scan/review before approval."],
+        kalshi_outcomes=_outcomes(rows, "kalshi"),
+        polymarket_outcomes=_outcomes(rows, "polymarket"),
+        warnings=[
+            (
+                "Oddpool found this event on both venues. Run scan/review before approval."
+                if len(venues) >= 2
+                else "Oddpool found this event on one venue; native matching must find the other side."
+            )
+        ],
         source="oddpool",
+        venues=venues,
     )
 
 
-def _outcomes(row: dict[str, Any], venue: str) -> list[str]:
+def _outcomes(rows: list[dict[str, Any]], venue: str) -> list[str]:
+    matching = [
+        row
+        for row in rows
+        if _venue(row) == venue or (venue == "polymarket" and _venue(row).startswith("polymarket"))
+    ]
+    row = matching[0] if matching else {}
+    questions = row.get("market_questions")
+    if isinstance(questions, list) and questions:
+        return [str(question) for question in questions[:8]]
     container = row.get(venue) or row.get(f"{venue}_markets") or row.get(f"{venue}_event")
     if isinstance(container, dict):
         markets = container.get("markets") or container.get("outcomes") or [container]
@@ -112,6 +149,20 @@ def _outcomes(row: dict[str, Any], venue: str) -> list[str]:
         return names[:8]
     count = row.get(f"{venue}_market_count")
     return [f"{count} markets"] if count else []
+
+
+def _venues(rows: list[dict[str, Any]]) -> list[str]:
+    return sorted({venue for row in rows if (venue := _venue(row))})
+
+
+def _venue(row: dict[str, Any]) -> str:
+    return str(row.get("exchange") or row.get("venue") or "").lower()
+
+
+def _group_key(row: dict[str, Any]) -> str:
+    title = str(row.get("title") or row.get("event_title") or row.get("name") or "")
+    title = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+    return re.sub(r"\s+", " ", title) or str(row.get("event_id") or row.get("id") or "")
 
 
 def _parse_time(value: Any) -> datetime | None:

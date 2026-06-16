@@ -48,6 +48,34 @@ foreach ($ProcessId in $Processes) {
     }
 }
 
+function Stop-OrphanedAppPorts {
+    $Connections = @(
+        Get-NetTCPConnection -LocalPort 8765, 3000 -State Listen -ErrorAction SilentlyContinue
+    )
+    foreach ($Connection in $Connections) {
+        $ProcessId = [int]$Connection.OwningProcess
+        if ($Processes -contains $ProcessId) {
+            continue
+        }
+        $ProcessInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+        if (-not $ProcessInfo) {
+            continue
+        }
+        $CommandLine = [string]$ProcessInfo.CommandLine
+        $IsThisApp =
+            $CommandLine.Contains("live_trading.control.app:app") -or
+            (
+                $CommandLine.Contains("node_modules\next\dist\bin\next") -and
+                $CommandLine.Contains("prediction_markets_arb")
+            )
+        if ($IsThisApp) {
+            Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Stop-OrphanedAppPorts
+
 if (Test-Path $PidFile) {
     Remove-Item -LiteralPath $PidFile
 }

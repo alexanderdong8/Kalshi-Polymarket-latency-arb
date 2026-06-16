@@ -91,6 +91,7 @@ class MarketSuggestion(BaseModel):
     polymarket_outcomes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     source: str = "native"
+    venues: list[str] = Field(default_factory=list)
 
 
 class ApprovalRequest(BaseModel):

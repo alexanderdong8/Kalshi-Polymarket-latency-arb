@@ -342,7 +342,17 @@ moved to [`strategy.md`](strategy.md).
 
 ### 1. Discover markets
 
-The user opens **Discover** and starts a scan.
+The user opens **Discover** and searches for events. If `ODDPOOL_API_KEY` is
+configured, typeahead suggestions come from Oddpool first. Oddpool is used only
+as a discovery index; approval still requires the application's deterministic
+checks, LLM review, and event manifest snapshot. Without Oddpool, typeahead falls
+back to recent cached venue catalogs and native matching.
+
+Search results are added to a local **Trading Basket**. Adding a result does not
+start a scan and does not refresh the review cards, so the user can collect
+multiple events first. The user then chooses **Prepare review** for the whole
+basket or scans one selected event. Review-ready candidates appear below the
+basket.
 
 The backend:
 
@@ -662,6 +672,8 @@ POLYMARKET_US_SECRET_KEY=
 
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-mini
+
+ODDPOOL_API_KEY=
 ```
 
 Use either `KALSHI_PRIVATE_KEY_PATH` or `KALSHI_PRIVATE_KEY_PEM`.
@@ -674,6 +686,7 @@ KALSHI_WS_URL=wss://api.elections.kalshi.com/trade-api/ws/v2
 POLYMARKET_US_GATEWAY_BASE=https://gateway.polymarket.us
 POLYMARKET_US_API_BASE=https://api.polymarket.us
 POLYMARKET_US_WS_URL=wss://api.polymarket.us/v1/ws/markets
+ODDPOOL_API_BASE=https://api.oddpool.com
 
 DISCOVERY_REFRESH_SECONDS=600
 STALE_AFTER_SECONDS=5

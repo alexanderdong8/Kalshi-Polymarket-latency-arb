@@ -604,6 +604,13 @@ export interface components {
             polymarket_outcomes?: string[];
             /** Warnings */
             warnings?: string[];
+            /**
+             * Source
+             * @default native
+             */
+            source: string;
+            /** Venues */
+            venues?: string[];
         };
         /** ModeConfiguration */
         ModeConfiguration: {

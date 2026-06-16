@@ -48,10 +48,6 @@ class CatalogService:
             errors.append(f"Kalshi catalog: {results[0]}")
         if isinstance(results[1], Exception):
             errors.append(f"Polymarket US catalog: {results[1]}")
-        if len(kalshi) >= limit:
-            errors.append(f"Kalshi catalog reached the configured {limit}-market scan limit.")
-        if len(polymarket) >= limit:
-            errors.append(f"Polymarket US catalog reached the configured {limit}-market scan limit.")
         return kalshi, polymarket, errors
 
 

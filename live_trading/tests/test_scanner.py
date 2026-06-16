@@ -9,9 +9,9 @@ from decimal import Decimal
 from live_trading.config import Settings
 from live_trading.control.db import ControlDatabase
 from live_trading.control.hub import EventHub
-from live_trading.control.schemas import ScanRequest
+from live_trading.control.schemas import ScanJob, ScanRequest
 from live_trading.models import VenueMarket
-from live_trading.scanner.catalogs import market_payload
+from live_trading.scanner.catalogs import CatalogService, market_payload
 from live_trading.scanner.candidate_generation import generate_event_pairs, group_events
 from live_trading.scanner.historical import HistoricalEvidenceProvider
 from live_trading.scanner.models import HistoricalEvidence, SizePoint
@@ -348,3 +348,70 @@ def test_suggestions_use_cached_recent_catalog(tmp_path) -> None:
     assert len(suggestions) == 1
     assert suggestions[0].name == "Lakers vs Celtics"
     assert suggestions[0].outcome_count == 2
+
+
+def test_catalog_limit_is_not_reported_as_scan_error(monkeypatch) -> None:
+    markets = [
+        _market("kalshi", f"KX-{index}", "Event", f"Outcome {index}", event_id="KX")
+        for index in range(10)
+    ]
+
+    class FakeKalshiClient:
+        def __init__(self, settings):
+            pass
+
+        async def list_active_markets(self, **_kwargs):
+            return markets
+
+    class FakePolymarketClient:
+        def __init__(self, settings):
+            pass
+
+        async def list_active_markets(self, **_kwargs):
+            return [
+                _market(
+                    "polymarket_us",
+                    f"pm-{index}",
+                    "Event",
+                    f"Outcome {index}",
+                    event_id="pm",
+                )
+                for index in range(10)
+            ]
+
+    import live_trading.scanner.catalogs as catalogs
+
+    monkeypatch.setattr(catalogs, "KalshiClient", FakeKalshiClient)
+    monkeypatch.setattr(catalogs, "PolymarketUSClient", FakePolymarketClient)
+
+    kalshi, polymarket, errors = asyncio.run(
+        CatalogService(_settings()).refresh(categories=None, limit=10)
+    )
+
+    assert len(kalshi) == 10
+    assert len(polymarket) == 10
+    assert errors == []
+
+
+def test_scan_with_empty_recent_catalog_completes_without_failure(tmp_path) -> None:
+    db = ControlDatabase(tmp_path / "control.sqlite3")
+    service = ScannerService(db, EventHub(), _settings(), tmp_path)
+
+    class EmptyCatalogs:
+        async def refresh(self, **_kwargs):
+            return [], [], []
+
+    service.catalogs = EmptyCatalogs()  # type: ignore[assignment]
+    job = ScanJob(
+        id="empty-scan",
+        status="queued",
+        started_at=datetime.now(timezone.utc),
+    )
+
+    asyncio.run(service._run(job, ScanRequest(query="no-match")))
+
+    payload = db.get("scan_jobs", job.id)
+    assert payload is not None
+    assert payload["status"] == "complete"
+    assert payload["candidate_count"] == 0
+    assert payload["errors"] == []

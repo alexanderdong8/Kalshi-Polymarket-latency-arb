@@ -15,8 +15,6 @@ def _load_env_files() -> None:
     for path in (
         cwd / ".env",
         cwd.parent / ".env",
-        cwd / "historical_testing" / ".env",
-        cwd.parent / "historical_testing" / ".env",
     ):
         if path.exists():
             load_dotenv(path, override=False)

@@ -70,6 +70,11 @@ export type MarketSuggestion = {
   polymarket_outcomes: string[];
   warnings: string[];
   source: string;
+  venues: string[];
+};
+
+export type SelectedMarket = MarketSuggestion & {
+  added_at: string;
 };
 
 export type VenueBalances = {
