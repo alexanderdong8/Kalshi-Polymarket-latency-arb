@@ -1,37 +1,62 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RefreshCw, Search, Sparkles } from "lucide-react";
 import { api, money, pct } from "@/lib/api";
-import type { Candidate, ScanJob } from "@/lib/types";
+import type { Candidate, MarketSuggestion, ScanJob } from "@/lib/types";
 import { EmptyState, PageHead, Progress, StatusBadge } from "@/components/ui";
 
 export default function DiscoverPage() {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selected, setSelected] = useState<Candidate | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const candidates = useQuery({
-    queryKey: ["candidates"],
-    queryFn: () => api<Candidate[]>("/candidates"),
+    queryKey: ["candidates", debouncedQuery],
+    queryFn: () =>
+      api<Candidate[]>(
+        `/candidates${debouncedQuery ? `?query=${encodeURIComponent(debouncedQuery)}` : ""}`,
+      ),
+    staleTime: 1000,
   });
-  const scans = useQuery({ queryKey: ["scans"], queryFn: () => api<ScanJob[]>("/scans") });
+  const suggestions = useQuery({
+    queryKey: ["market-suggestions", debouncedQuery],
+    queryFn: () =>
+      api<MarketSuggestion[]>(
+        `/market-suggestions?query=${encodeURIComponent(debouncedQuery)}&lookback_days=7&limit=8`,
+      ),
+    enabled: debouncedQuery.length >= 2,
+    staleTime: 30_000,
+  });
+  const scans = useQuery({
+    queryKey: ["scans"],
+    queryFn: () => api<ScanJob[]>("/scans"),
+    refetchInterval: (queryState) => {
+      const current = queryState.state.data?.[0];
+      return current && ["queued", "refreshing", "matching", "reviewing"].includes(current.status) ? 1000 : false;
+    },
+  });
   const scan = useMutation({
-    mutationFn: () =>
+    mutationFn: (scanQuery?: string) =>
       api<ScanJob>("/scans", {
         method: "POST",
-        body: JSON.stringify({ query, categories: [], max_markets: 1000 }),
+        body: JSON.stringify({
+          query: scanQuery ?? query,
+          categories: [],
+          max_markets: 250,
+          lookback_days: 7,
+        }),
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["scans"] }),
   });
-  const filtered = useMemo(() => {
-    const needle = query.toLowerCase();
-    return (candidates.data ?? []).filter((item) =>
-      `${item.name} ${item.category ?? ""} ${item.mappings.map((row) => `${row.kalshi_ticker} ${row.polymarket_us_slug}`).join(" ")}`
-        .toLowerCase()
-        .includes(needle),
-    );
-  }, [candidates.data, query]);
+  const filtered = useMemo(() => candidates.data ?? [], [candidates.data]);
   const currentScan = scans.data?.[0];
 
   return (
@@ -41,7 +66,7 @@ export default function DiscoverPage() {
         title="Find complete events, not loose contracts."
         description="Refresh both venues, match every outcome, inspect settlement equivalence, then approve the event you actually intend to trade."
         actions={
-          <button className="button primary" onClick={() => scan.mutate()} disabled={scan.isPending}>
+          <button className="button primary" onClick={() => scan.mutate(query)} disabled={scan.isPending}>
             <Sparkles size={16} /> {scan.isPending ? "Starting..." : "Scan markets"}
           </button>
         }
@@ -56,6 +81,45 @@ export default function DiscoverPage() {
         />
         <span>{filtered.length} candidates</span>
       </section>
+      {debouncedQuery.length >= 2 ? (
+        <section className="suggestion-panel">
+          <div className="suggestion-title">
+            <div>
+              <p className="eyebrow">Typeahead</p>
+              <h2>Shared tradable events from the last 7 days</h2>
+            </div>
+            <span>{suggestions.isFetching ? "Searching..." : `${suggestions.data?.length ?? 0} suggestions`}</span>
+          </div>
+          {suggestions.data?.length ? (
+            <div className="suggestion-list">
+              {suggestions.data.map((item) => (
+                <button
+                  className="suggestion-row"
+                  key={item.id}
+                  onClick={() => {
+                    setQuery(item.name);
+                    scan.mutate(item.name);
+                  }}
+                >
+                  <span>
+                    <b>{item.name}</b>
+                    <small>
+                      {item.category ?? "Uncategorized"} · {item.outcome_count} mapped outcomes · {(item.mapping_confidence * 100).toFixed(0)}% match
+                    </small>
+                  </span>
+                  <span className="suggestion-books">
+                    Kalshi: {item.kalshi_outcomes.join(" / ")} · Polymarket: {item.polymarket_outcomes.join(" / ")}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="suggestion-empty">
+              {suggestions.isFetching ? "Searching recent tradable catalogs..." : "No shared Kalshi/Polymarket US event suggestions matched this text."}
+            </p>
+          )}
+        </section>
+      ) : null}
       {currentScan ? (
         <section className="scan-strip">
           <div>
@@ -64,7 +128,7 @@ export default function DiscoverPage() {
             <StatusBadge value={currentScan.status} />
           </div>
           <Progress value={currentScan.progress} />
-          <small>{currentScan.candidate_count} candidates · catalogs refresh before every scan</small>
+          <small>{currentScan.candidate_count} candidates · recent tradable catalogs, 7-day lookback</small>
         </section>
       ) : null}
       {filtered.length ? (

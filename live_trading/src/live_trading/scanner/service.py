@@ -13,6 +13,7 @@ from ..control.hub import EventHub
 from ..control.llm_matcher import LLMEventMatcher
 from ..control.schemas import (
     Candidate,
+    MarketSuggestion,
     OutcomeMapping,
     RankingBreakdown,
     ScanJob,
@@ -22,7 +23,7 @@ from ..models import MatchedMarket
 from ..venues.kalshi import KalshiClient
 from ..venues.polymarket_us import PolymarketUSClient
 from .candidate_generation import generate_event_pairs
-from .catalogs import CatalogService, market_payload
+from .catalogs import CatalogService, market_from_payload, market_payload
 from .historical import HistoricalEvidenceProvider
 from .market_state import (
     build_strategy_books,
@@ -56,6 +57,7 @@ class ScannerService:
         self.history = HistoricalEvidenceProvider(repository_root)
         self.llm = LLMEventMatcher()
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._suggestion_lock = asyncio.Lock()
 
     def start(self, request: ScanRequest) -> ScanJob:
         job = ScanJob(
@@ -76,16 +78,19 @@ class ScannerService:
                 job,
                 status="refreshing",
                 progress=0.05,
-                message="Refreshing complete venue catalogs",
+                message=f"Refreshing recent tradable venue catalogs from the last {request.lookback_days} days",
             )
             kalshi, polymarket, errors = await self.catalogs.refresh(
                 categories=request.categories or None,
                 limit=request.max_markets,
+                lookback_days=request.lookback_days,
             )
             self.repository.put_catalog(
                 job.id,
                 {
                     "id": job.id,
+                    "kind": "recent_tradable",
+                    "lookback_days": request.lookback_days,
                     "fetched_at": now().isoformat(),
                     "kalshi": [market_payload(row) for row in kalshi],
                     "polymarket_us": [market_payload(row) for row in polymarket],
@@ -169,6 +174,62 @@ class ScannerService:
                 errors=[*job.errors, str(exc)],
                 completed_at=now(),
             )
+
+    async def suggestions(
+        self,
+        *,
+        query: str,
+        limit: int = 8,
+        lookback_days: int = 7,
+    ) -> list[MarketSuggestion]:
+        if len(query.strip()) < 2:
+            return []
+        catalog = self.repository.latest_recent_catalog(
+            max_age_seconds=self.settings.discovery_refresh_seconds
+        )
+        if catalog is None:
+            async with self._suggestion_lock:
+                catalog = self.repository.latest_recent_catalog(
+                    max_age_seconds=self.settings.discovery_refresh_seconds
+                )
+                if catalog is None:
+                    kalshi, polymarket, errors = await self.catalogs.refresh(
+                        categories=None,
+                        limit=250,
+                        lookback_days=lookback_days,
+                        max_pages=1,
+                        timeout_seconds=6,
+                    )
+                    catalog = {
+                        "id": f"suggestions-{uuid.uuid4().hex}",
+                        "kind": "recent_tradable",
+                        "lookback_days": lookback_days,
+                        "fetched_at": now().isoformat(),
+                        "kalshi": [market_payload(row) for row in kalshi],
+                        "polymarket_us": [market_payload(row) for row in polymarket],
+                        "errors": errors,
+                    }
+                    self.repository.put_catalog(catalog["id"], catalog)
+        kalshi = [market_from_payload(row) for row in catalog.get("kalshi", [])]
+        polymarket = [
+            market_from_payload(row) for row in catalog.get("polymarket_us", [])
+        ]
+        wanted = token_set(query)
+        pairs = []
+        for pair in generate_event_pairs(kalshi, polymarket):
+            haystack = token_set(
+                f"{pair.kalshi.title} {pair.polymarket.title} "
+                f"{pair.kalshi.category or ''} {pair.polymarket.category or ''} "
+                + " ".join(
+                    f"{match.kalshi.stream_key} {match.polymarket_us.stream_key} "
+                    f"{match.kalshi.yes_label} {match.polymarket_us.yes_label}"
+                    for match in pair.outcome_matches
+                )
+            )
+            if wanted & haystack:
+                pairs.append(pair)
+        pairs.sort(key=lambda pair: pair.confidence, reverse=True)
+        return [_suggestion(pair) for pair in pairs[:limit]]
 
     def _candidate(self, pair: EventPair) -> Candidate:
         mappings = [_mapping(match) for match in pair.outcome_matches]
@@ -325,6 +386,26 @@ def _outcome_name(match: MatchedMarket) -> str:
         if text and text.casefold() not in {"yes", "true"}:
             return text
     return match.kalshi.title
+
+
+def _suggestion(pair: EventPair) -> MarketSuggestion:
+    candidate_id = hashlib.sha1(
+        f"{pair.kalshi.key}|{pair.polymarket.key}".encode()
+    ).hexdigest()[:16]
+    return MarketSuggestion(
+        id=candidate_id,
+        name=pair.kalshi.title or pair.polymarket.title,
+        category=pair.kalshi.category or pair.polymarket.category,
+        close_time=pair.kalshi.close_time or pair.polymarket.close_time,
+        outcome_count=len(pair.outcome_matches),
+        mapping_confidence=float(pair.confidence),
+        kalshi_outcomes=[match.kalshi.yes_label for match in pair.outcome_matches],
+        polymarket_outcomes=[
+            f"{match.polymarket_us.yes_label} ({match.polymarket_us.raw.get('outcome_side') or 'long'})"
+            for match in pair.outcome_matches
+        ],
+        warnings=list(pair.warnings),
+    )
 
 
 def _freshness(points: list[SizePoint], settings: Settings) -> float:

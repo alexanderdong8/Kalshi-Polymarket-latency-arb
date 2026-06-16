@@ -65,7 +65,8 @@ class Candidate(BaseModel):
 class ScanRequest(BaseModel):
     query: str = ""
     categories: list[str] = Field(default_factory=list)
-    max_markets: int = Field(default=500, ge=10, le=3000)
+    max_markets: int = Field(default=250, ge=10, le=1000)
+    lookback_days: int = Field(default=7, ge=1, le=30)
 
 
 class ScanJob(BaseModel):
@@ -77,6 +78,18 @@ class ScanJob(BaseModel):
     errors: list[str] = Field(default_factory=list)
     started_at: datetime
     completed_at: datetime | None = None
+
+
+class MarketSuggestion(BaseModel):
+    id: str
+    name: str
+    category: str | None = None
+    close_time: datetime | None = None
+    outcome_count: int
+    mapping_confidence: float
+    kalshi_outcomes: list[str] = Field(default_factory=list)
+    polymarket_outcomes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ApprovalRequest(BaseModel):

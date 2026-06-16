@@ -67,6 +67,7 @@ class PolymarketUSClient:
         limit: int = 1000,
         timeout_seconds: float = 30,
         max_pages: int | None = None,
+        recent_after: datetime | None = None,
     ) -> list[VenueMarket]:
         params: dict[str, Any] = {"active": "true", "closed": "false", "limit": min(limit, 500), "offset": 0}
         if categories:
@@ -86,7 +87,11 @@ class PolymarketUSClient:
                     break
                 for raw in rows:
                     for market in market_variants_from_api(raw):
-                        if market.active and _category_allowed(market.category, categories):
+                        if (
+                            market.active
+                            and _category_allowed(market.category, categories)
+                            and _recent_enough(market, recent_after)
+                        ):
                             markets.append(market)
                 if len(rows) < int(params["limit"]) or (max_pages is not None and pages_seen >= max_pages):
                     break
@@ -183,3 +188,27 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
         return False
     wanted = {item.strip().lower() for item in categories}
     return category.lower() in wanted
+
+
+def _recent_enough(market: VenueMarket, recent_after: datetime | None) -> bool:
+    if recent_after is None:
+        return True
+    marker = _recent_marker(market)
+    return marker is not None and marker >= recent_after
+
+
+def _recent_marker(market: VenueMarket) -> datetime | None:
+    for key in (
+        "createdAt",
+        "created_at",
+        "createdDate",
+        "openTime",
+        "open_time",
+        "startDate",
+        "gameStartTime",
+        "endDate",
+    ):
+        marker = parse_ts(market.raw.get(key))
+        if marker is not None:
+            return marker
+    return market.start_time or market.close_time or market.expiration_time

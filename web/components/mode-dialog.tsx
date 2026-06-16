@@ -16,7 +16,14 @@ export function ModeDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [budget, setBudget] = useState(mode === "backtest" ? 1000 : 100);
+  const [budget, setBudget] = useState(() => {
+    if (mode === "backtest") return 1000;
+    if (mode === "paper" && typeof window !== "undefined") {
+      const stored = Number(window.localStorage.getItem("paper-default-budget") || 100);
+      return Number.isFinite(stored) && stored > 0 ? stored : 100;
+    }
+    return 100;
+  });
   const [confirmation, setConfirmation] = useState("");
   const preview = useQuery({
     queryKey: ["live-preview", event.id, budget],
@@ -56,6 +63,9 @@ export function ModeDialog({
       });
     },
     onSuccess: () => {
+      if (mode === "paper") {
+        window.localStorage.setItem("paper-default-budget", String(budget));
+      }
       queryClient.invalidateQueries();
       onClose();
     },

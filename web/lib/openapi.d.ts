@@ -90,6 +90,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Market Suggestions */
+        get: operations["market_suggestions_api_market_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/candidates": {
         parameters: {
             query?: never;
@@ -381,6 +398,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Balances */
+        get: operations["balances_api_balances_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/diagnostics": {
         parameters: {
             query?: never;
@@ -549,6 +583,27 @@ export interface components {
             strategy?: components["schemas"]["StrategySettings"];
             /** Confirmation */
             confirmation: string;
+        };
+        /** MarketSuggestion */
+        MarketSuggestion: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Category */
+            category?: string | null;
+            /** Close Time */
+            close_time?: string | null;
+            /** Outcome Count */
+            outcome_count: number;
+            /** Mapping Confidence */
+            mapping_confidence: number;
+            /** Kalshi Outcomes */
+            kalshi_outcomes?: string[];
+            /** Polymarket Outcomes */
+            polymarket_outcomes?: string[];
+            /** Warnings */
+            warnings?: string[];
         };
         /** ModeConfiguration */
         ModeConfiguration: {
@@ -743,9 +798,14 @@ export interface components {
             categories?: string[];
             /**
              * Max Markets
-             * @default 500
+             * @default 250
              */
             max_markets: number;
+            /**
+             * Lookback Days
+             * @default 7
+             */
+            lookback_days: number;
         };
         /** SettingsStatus */
         SettingsStatus: {
@@ -1035,6 +1095,39 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+        };
+    };
+    market_suggestions_api_market_suggestions_get: {
+        parameters: {
+            query: {
+                query: string;
+                limit?: number;
+                lookback_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSuggestion"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1620,6 +1713,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsStatus"];
+                };
+            };
+        };
+    };
+    balances_api_balances_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

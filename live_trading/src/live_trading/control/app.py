@@ -26,6 +26,7 @@ from .schemas import (
     BacktestRequest,
     Candidate,
     LiveActivationRequest,
+    MarketSuggestion,
     ModeConfiguration,
     ScanJob,
     ScanRequest,
@@ -123,6 +124,18 @@ def create_app(
     @app.get("/api/catalogs")
     async def catalogs() -> list[dict[str, Any]]:
         return db.list("catalog_snapshots")
+
+    @app.get("/api/market-suggestions", response_model=list[MarketSuggestion])
+    async def market_suggestions(
+        query: str = Query(min_length=2),
+        limit: int = Query(default=8, ge=1, le=20),
+        lookback_days: int = Query(default=7, ge=1, le=30),
+    ) -> list[MarketSuggestion]:
+        return await scanner.suggestions(
+            query=query,
+            limit=limit,
+            lookback_days=lookback_days,
+        )
 
     @app.get("/api/candidates", response_model=list[Candidate])
     async def candidates(
@@ -346,6 +359,32 @@ def create_app(
             workers=supervisor.list_workers(),
             emergency_stop=supervisor.global_emergency_path.exists(),
         )
+
+    @app.get("/api/balances")
+    async def balances() -> dict[str, Any]:
+        journal = ExecutionJournal(control_root / "balances.sqlite3")
+        client = LiveOrderClient(settings, journal)
+
+        async def read(label: str, venue: str) -> tuple[str, str | None, str | None]:
+            try:
+                return label, str(await client.get_balance(venue)), None
+            except Exception as exc:
+                return label, None, str(exc)
+
+        rows = await asyncio.gather(
+            read("kalshi", "kalshi"),
+            read("polymarket_us", "polymarket_us"),
+        )
+        payload: dict[str, Any] = {
+            "kalshi_balance": None,
+            "polymarket_us_balance": None,
+            "errors": [],
+        }
+        for label, value, error in rows:
+            payload[f"{label}_balance"] = value
+            if error:
+                payload["errors"].append(f"{label}: {error}")
+        return payload
 
     @app.post("/api/settings/diagnostics")
     async def diagnostics() -> dict[str, Any]:

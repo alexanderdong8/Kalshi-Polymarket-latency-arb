@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from live_trading.config import Settings
+from live_trading.control.db import ControlDatabase
+from live_trading.control.hub import EventHub
+from live_trading.control.schemas import ScanRequest
 from live_trading.models import VenueMarket
+from live_trading.scanner.catalogs import market_payload
 from live_trading.scanner.candidate_generation import generate_event_pairs, group_events
 from live_trading.scanner.historical import HistoricalEvidenceProvider
 from live_trading.scanner.models import HistoricalEvidence, SizePoint
 from live_trading.scanner.ranking import rank_opportunity
+from live_trading.scanner.service import ScannerService
 from live_trading.venues.polymarket_us import market_variants_from_api
 
 
@@ -267,3 +274,75 @@ def test_unprofitable_current_books_cannot_be_rescued_by_history() -> None:
 
     assert ranking.selected is None
     assert ranking.expected_deployable_profit == 0
+
+
+def _settings() -> Settings:
+    return Settings(
+        kalshi_api_base="https://kalshi.test",
+        kalshi_ws_url="wss://kalshi.test/ws",
+        kalshi_api_key_id=None,
+        kalshi_private_key_path=None,
+        kalshi_private_key_pem=None,
+        polymarket_gateway_base="https://polymarket.test",
+        polymarket_api_base="https://polymarket-api.test",
+        polymarket_ws_url="wss://polymarket.test/ws",
+        polymarket_key_id=None,
+        polymarket_secret_key=None,
+        discovery_refresh_seconds=600,
+        stale_after_seconds=Decimal("5"),
+        max_matches=100,
+        min_match_confidence=Decimal("0.74"),
+        min_gross_edge=Decimal("0"),
+        slippage_buffer_per_pair=Decimal("0.01"),
+        trade_size=100,
+        kalshi_fee_mode="taker",
+        polymarket_taker_theta=Decimal("0.05"),
+        live_data_dir="live_trading/data",
+        live_data_quota_bytes=1000,
+        live_data_low_watermark_bytes=900,
+        snapshot_interval_seconds=Decimal("30"),
+        routine_queue_maxsize=100,
+        tui_refresh_seconds=Decimal("0.25"),
+        metrics_write_seconds=Decimal("10"),
+        runtime_architecture="pooled",
+        strategy_worker_count=2,
+    )
+
+
+def test_scan_request_defaults_to_recent_tradable_window() -> None:
+    request = ScanRequest()
+
+    assert request.lookback_days == 7
+    assert request.max_markets == 250
+
+
+def test_suggestions_use_cached_recent_catalog(tmp_path) -> None:
+    db = ControlDatabase(tmp_path / "control.sqlite3")
+    service = ScannerService(db, EventHub(), _settings(), tmp_path)
+    kalshi = [
+        _market("kalshi", "KX-LAL", "Lakers vs Celtics", "Lakers", event_id="KX-NBA"),
+        _market("kalshi", "KX-BOS", "Lakers vs Celtics", "Boston", event_id="KX-NBA"),
+    ]
+    polymarket = [
+        _market("polymarket_us", "p-lal", "Lakers vs Celtics", "Lakers", event_id="pm-nba"),
+        _market("polymarket_us", "p-bos", "Lakers vs Celtics", "Celtics", event_id="pm-nba"),
+    ]
+    db.put(
+        "catalog_snapshots",
+        "recent",
+        {
+            "id": "recent",
+            "kind": "recent_tradable",
+            "lookback_days": 7,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "kalshi": [market_payload(row) for row in kalshi],
+            "polymarket_us": [market_payload(row) for row in polymarket],
+            "errors": [],
+        },
+    )
+
+    suggestions = asyncio.run(service.suggestions(query="lakers", limit=5))
+
+    assert len(suggestions) == 1
+    assert suggestions[0].name == "Lakers vs Celtics"
+    assert suggestions[0].outcome_count == 2

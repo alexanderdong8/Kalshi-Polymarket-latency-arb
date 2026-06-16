@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pause, SquareArrowOutUpRight } from "lucide-react";
 import { api, age, money } from "@/lib/api";
-import type { Worker } from "@/lib/types";
+import type { VenueBalances, Worker } from "@/lib/types";
 import { EmptyState, Metric, PageHead, StatusBadge } from "@/components/ui";
 import { MarketChart } from "./market-chart";
 
@@ -14,21 +15,29 @@ export function WorkersPage({ mode }: { mode: "paper" | "live" }) {
     queryKey: ["workers", mode],
     queryFn: () => api<Worker[]>(`/workers?mode=${mode}`),
   });
+  const balances = useQuery({
+    queryKey: ["balances"],
+    queryFn: () => api<VenueBalances>("/balances"),
+    enabled: mode === "live",
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const [paperBudget, setPaperBudget] = useState(() => readPaperBudgetDefault());
+
+  useEffect(() => {
+    if (mode !== "paper") return;
+    window.localStorage.setItem("paper-default-budget", String(paperBudget));
+  }, [mode, paperBudget]);
+
   const stop = useMutation({
     mutationFn: (id: string) => api(`/workers/${id}/stop`, { method: "POST" }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["workers"] }),
   });
   const active = (workers.data ?? []).filter((row) => ["starting", "running"].includes(row.status));
   const total = active.reduce((sum, row) => sum + row.budget, 0);
-  const liveBalances = active.reduce(
-    (sum, row) => {
-      const preview = row.state.startup_preview as
-        | { reconciliation?: { kalshi_balance?: string; polymarket_us_balance?: string } }
-        | undefined;
-      return sum + Number(preview?.reconciliation?.kalshi_balance ?? 0) + Number(preview?.reconciliation?.polymarket_us_balance ?? 0);
-    },
-    0,
-  );
+  const kalshiBalance = Number(balances.data?.kalshi_balance ?? 0);
+  const polymarketBalance = Number(balances.data?.polymarket_us_balance ?? 0);
+  const liveBalances = kalshiBalance + polymarketBalance;
   return (
     <>
       <PageHead
@@ -37,11 +46,40 @@ export function WorkersPage({ mode }: { mode: "paper" | "live" }) {
         description={mode === "live" ? "Real venue balances, reconciled positions, and explicit risk controls." : "Live public books, simulated execution, and independent event budgets."}
       />
       {mode === "live" ? <div className="live-ribbon">LIVE MONEY · ORDERS CAN REACH VENUES</div> : <div className="paper-ribbon">PAPER · SIMULATED EXECUTION</div>}
+      {mode === "paper" ? (
+        <section className="panel paper-config">
+          <label>
+            Default paper bankroll for new sessions
+            <div className="money-input">
+              <span>$</span>
+              <input
+                type="number"
+                min="1"
+                value={paperBudget}
+                onChange={(event) => setPaperBudget(Number(event.target.value))}
+              />
+            </div>
+          </label>
+          <p>
+            This default is used when you start paper trading from My Markets. Each approved event still gets its own independent budget.
+          </p>
+        </section>
+      ) : null}
+      {mode === "live" && balances.data?.errors.length ? (
+        <p className="form-error">Balance check warning: {balances.data.errors.join(" · ")}</p>
+      ) : null}
       <div className="metrics-grid">
         <Metric label="Active sessions" value={String(active.length)} detail={`${workers.data?.length ?? 0} total records`} />
-        <Metric label={mode === "live" ? "Venue funds" : "Paper allocation"} value={money(mode === "live" ? liveBalances : total)} detail={mode === "live" ? `${money(total)} allocated across events` : "Sum of independent budgets"} tone={mode === "live" ? "risk" : "positive"} />
+        {mode === "live" ? (
+          <>
+            <Metric label="Kalshi funds" value={money(kalshiBalance)} detail={balances.isFetching ? "Refreshing balance" : "Venue buying power"} tone="risk" />
+            <Metric label="Polymarket US funds" value={money(polymarketBalance)} detail="Venue buying power" tone="risk" />
+          </>
+        ) : (
+          <Metric label="Paper allocation" value={money(total)} detail={`${money(paperBudget)} default for new sessions`} tone="positive" />
+        )}
+        <Metric label={mode === "live" ? "Live allocations" : "Default bankroll"} value={money(mode === "live" ? total : paperBudget)} detail={mode === "live" ? `${money(liveBalances)} total venue funds` : "Stored locally for new paper starts"} tone={mode === "live" ? "risk" : "positive"} />
         <Metric label="Open baskets" value={String(active.reduce((sum, row) => sum + Number((row.state.positions as unknown[])?.length ?? 0), 0))} detail="Across active events" />
-        <Metric label="Stream health" value={active.every((row) => !row.pause_reason) ? "Nominal" : "Attention"} detail="Fresh books required for entry" />
       </div>
       <section className="panel chart-panel">
         <MarketChart
@@ -77,4 +115,10 @@ export function WorkersPage({ mode }: { mode: "paper" | "live" }) {
       )}
     </>
   );
+}
+
+function readPaperBudgetDefault() {
+  if (typeof window === "undefined") return 100;
+  const stored = Number(window.localStorage.getItem("paper-default-budget") || 100);
+  return Number.isFinite(stored) && stored > 0 ? stored : 100;
 }

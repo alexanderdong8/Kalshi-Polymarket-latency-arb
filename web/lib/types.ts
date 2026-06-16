@@ -59,6 +59,24 @@ export type Candidate = {
   updated_at: string;
 };
 
+export type MarketSuggestion = {
+  id: string;
+  name: string;
+  category?: string | null;
+  close_time?: string | null;
+  outcome_count: number;
+  mapping_confidence: number;
+  kalshi_outcomes: string[];
+  polymarket_outcomes: string[];
+  warnings: string[];
+};
+
+export type VenueBalances = {
+  kalshi_balance?: string | null;
+  polymarket_us_balance?: string | null;
+  errors: string[];
+};
+
 export type MarketEvent = Candidate & {
   slug: string;
   manifest_path: string;

@@ -59,8 +59,9 @@ class KalshiClient:
         timeout_seconds: float = 30,
         retries: int = 4,
         max_pages: int | None = None,
+        recent_after: datetime | None = None,
     ) -> list[VenueMarket]:
-        page_limit = min(max(limit * 4, 100), 1000)
+        page_limit = min(max(limit, 100), 1000)
         params: dict[str, Any] = {"status": "open", "limit": page_limit}
         url = f"{self.settings.kalshi_api_base.rstrip('/')}/markets?{urlencode(params)}"
         markets: list[VenueMarket] = []
@@ -81,7 +82,7 @@ class KalshiClient:
                     break
                 for raw in payload.get("markets") or []:
                     market = market_from_api(raw)
-                    if _category_allowed(market.category, categories):
+                    if _category_allowed(market.category, categories) and _recent_enough(market, recent_after):
                         markets.append(market)
                 cursor = payload.get("cursor")
                 if not cursor or len(markets) >= limit or (max_pages is not None and pages_seen >= max_pages):
@@ -194,3 +195,25 @@ def _category_allowed(category: str | None, categories: list[str] | None) -> boo
         return False
     wanted = {item.strip().lower() for item in categories}
     return category.lower() in wanted
+
+
+def _recent_enough(market: VenueMarket, recent_after: datetime | None) -> bool:
+    if recent_after is None:
+        return True
+    marker = _recent_marker(market)
+    return marker is not None and marker >= recent_after
+
+
+def _recent_marker(market: VenueMarket) -> datetime | None:
+    for key in (
+        "open_time",
+        "created_time",
+        "created_at",
+        "createdAt",
+        "start_time",
+        "close_time",
+    ):
+        marker = parse_ts(market.raw.get(key))
+        if marker is not None:
+            return marker
+    return market.start_time or market.close_time or market.expiration_time
