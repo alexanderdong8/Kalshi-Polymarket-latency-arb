@@ -64,7 +64,7 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .search-panel { background: var(--surface); border: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; padding: 0 18px; height: 58px; box-shadow: var(--shadow); }
 .search-panel input { border: 0; outline: 0; background: transparent; font-size: 15px; }
 .search-panel > span { font: 500 10px var(--font-mono), monospace; color: var(--muted); text-transform: uppercase; }
-.suggestion-panel { border: 1px solid var(--line); border-top: 0; background: #fffdf8; margin-bottom: 14px; box-shadow: var(--shadow); }
+.suggestion-panel { border: 1px solid var(--line); background: #fffdf8; margin: 14px 0 22px; box-shadow: var(--shadow); }
 .suggestion-title { display: flex; align-items: end; justify-content: space-between; gap: 14px; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
 .suggestion-title h2 { margin: 2px 0 0; font-size: 17px; }
 .suggestion-title > span { color: var(--muted); font: 500 10px var(--font-mono), monospace; text-transform: uppercase; }
@@ -179,10 +179,10 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .paper-ribbon, .live-ribbon { padding: 8px 13px; font: 600 10px var(--font-mono), monospace; letter-spacing: .1em; margin-bottom: 12px; }
 .paper-ribbon { color: var(--green); background: var(--green-pale); border-left: 4px solid var(--green); }
 .live-ribbon { color: white; background: var(--red); border-left: 4px solid var(--red-dark); }
-.paper-config { display: grid; grid-template-columns: minmax(240px, .4fr) 1fr; gap: 18px; align-items: end; margin-bottom: 16px; }
-.paper-config p { margin: 0; color: var(--muted); line-height: 1.55; }
-.paper-config label { font-weight: 600; }
-.paper-config .money-input { margin-top: 8px; max-width: 260px; }
+.paper-config { display: grid; grid-template-columns: minmax(220px, 320px) auto; gap: 22px; align-items: end; padding: 22px; margin-bottom: 20px; }
+.paper-config label { font-weight: 650; color: var(--ink); }
+.paper-config .money-input { margin-top: 10px; max-width: 260px; min-height: 46px; }
+.paper-config-note { color: var(--muted); font-size: 13px; padding-bottom: 12px; }
 .panel { background: var(--surface); border: 1px solid var(--line); }
 .chart-panel { margin-bottom: 16px; min-width: 0; overflow: hidden; }
 .table-panel { margin-top: 16px; }

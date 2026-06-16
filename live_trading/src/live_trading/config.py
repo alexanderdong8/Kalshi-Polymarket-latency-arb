@@ -51,6 +51,8 @@ class Settings:
     polymarket_ws_url: str
     polymarket_key_id: str | None
     polymarket_secret_key: str | None
+    oddpool_api_base: str
+    oddpool_api_key: str | None
     discovery_refresh_seconds: int
     stale_after_seconds: Decimal
     max_matches: int
@@ -84,6 +86,8 @@ class Settings:
             polymarket_ws_url=os.getenv("POLYMARKET_US_WS_URL", "wss://api.polymarket.us/v1/ws/markets"),
             polymarket_key_id=_env_any("POLYMARKET_US_KEY_ID", "POLYMARKET_KEY_ID", "pm-key-id"),
             polymarket_secret_key=_env_any("POLYMARKET_US_SECRET_KEY", "POLYMARKET_SECRET_KEY", "pm-secret-key"),
+            oddpool_api_base=os.getenv("ODDPOOL_API_BASE", "https://api.oddpool.com"),
+            oddpool_api_key=_env_any("ODDPOOL_API_KEY", "oddpool-api-key"),
             discovery_refresh_seconds=_int_env("DISCOVERY_REFRESH_SECONDS", 600),
             stale_after_seconds=_decimal_env("STALE_AFTER_SECONDS", "5"),
             max_matches=_int_env("MAX_MATCHES", 100),

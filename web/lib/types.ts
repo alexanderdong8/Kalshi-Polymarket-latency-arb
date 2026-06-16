@@ -69,6 +69,7 @@ export type MarketSuggestion = {
   kalshi_outcomes: string[];
   polymarket_outcomes: string[];
   warnings: string[];
+  source: string;
 };
 
 export type VenueBalances = {

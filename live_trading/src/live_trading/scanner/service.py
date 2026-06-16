@@ -33,6 +33,7 @@ from .market_state import (
 )
 from .models import EventPair, HistoricalEvidence, SizePoint
 from .normalization import token_set
+from .oddpool import OddpoolClient
 from .ranking import rank_opportunity
 from .repository import ScannerRepository
 
@@ -56,6 +57,7 @@ class ScannerService:
         self.repository = ScannerRepository(db)
         self.history = HistoricalEvidenceProvider(repository_root)
         self.llm = LLMEventMatcher()
+        self.oddpool = OddpoolClient(settings)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._suggestion_lock = asyncio.Lock()
 
@@ -184,6 +186,13 @@ class ScannerService:
     ) -> list[MarketSuggestion]:
         if len(query.strip()) < 2:
             return []
+        if self.oddpool.available:
+            try:
+                suggestions = await self.oddpool.search_events(query, limit=limit)
+                if suggestions:
+                    return suggestions
+            except Exception:
+                pass
         catalog = self.repository.latest_recent_catalog(
             max_age_seconds=self.settings.discovery_refresh_seconds
         )
@@ -405,6 +414,7 @@ def _suggestion(pair: EventPair) -> MarketSuggestion:
             for match in pair.outcome_matches
         ],
         warnings=list(pair.warnings),
+        source="native",
     )
 
 

@@ -63,8 +63,7 @@ export default function DiscoverPage() {
     <>
       <PageHead
         eyebrow="01 / Market intake"
-        title="Find complete events, not loose contracts."
-        description="Refresh both venues, match every outcome, inspect settlement equivalence, then approve the event you actually intend to trade."
+        title="Search events on Kalshi and Polymarket"
         actions={
           <button className="button primary" onClick={() => scan.mutate(query)} disabled={scan.isPending}>
             <Sparkles size={16} /> {scan.isPending ? "Starting..." : "Scan markets"}
@@ -86,7 +85,7 @@ export default function DiscoverPage() {
           <div className="suggestion-title">
             <div>
               <p className="eyebrow">Typeahead</p>
-              <h2>Shared tradable events from the last 7 days</h2>
+              <h2>Matching events</h2>
             </div>
             <span>{suggestions.isFetching ? "Searching..." : `${suggestions.data?.length ?? 0} suggestions`}</span>
           </div>
@@ -105,6 +104,7 @@ export default function DiscoverPage() {
                     <b>{item.name}</b>
                     <small>
                       {item.category ?? "Uncategorized"} · {item.outcome_count} mapped outcomes · {(item.mapping_confidence * 100).toFixed(0)}% match
+                      {item.source === "oddpool" ? " · Oddpool" : ""}
                     </small>
                   </span>
                   <span className="suggestion-books">

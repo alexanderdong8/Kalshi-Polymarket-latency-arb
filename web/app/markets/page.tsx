@@ -14,7 +14,7 @@ export default function MarketsPage() {
   const [dialog, setDialog] = useState<{ event: MarketEvent; mode: "paper" | "live" | "backtest" } | null>(null);
   return (
     <>
-      <PageHead eyebrow="02 / Approved universe" title="My Markets" description="One reviewed event can run independently in paper, live, and historical replay. Budgets never leak between modes." />
+      <PageHead eyebrow="02 / Approved universe" title="My Markets" />
       {events.data?.length ? (
         <div className="market-list">
           {events.data.map((event) => (

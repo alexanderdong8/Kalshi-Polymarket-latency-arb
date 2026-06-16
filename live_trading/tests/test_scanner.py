@@ -288,6 +288,8 @@ def _settings() -> Settings:
         polymarket_ws_url="wss://polymarket.test/ws",
         polymarket_key_id=None,
         polymarket_secret_key=None,
+        oddpool_api_base="https://oddpool.test",
+        oddpool_api_key=None,
         discovery_refresh_seconds=600,
         stale_after_seconds=Decimal("5"),
         max_matches=100,

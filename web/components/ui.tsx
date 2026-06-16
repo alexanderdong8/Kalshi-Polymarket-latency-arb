@@ -8,7 +8,7 @@ export function PageHead({
 }: {
   eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
   actions?: React.ReactNode;
 }) {
   return (
@@ -16,7 +16,7 @@ export function PageHead({
       <div>
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
-        <p className="lede">{description}</p>
+        {description ? <p className="lede">{description}</p> : null}
       </div>
       {actions ? <div className="head-actions">{actions}</div> : null}
     </div>

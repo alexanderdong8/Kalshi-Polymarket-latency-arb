@@ -43,13 +43,12 @@ export function WorkersPage({ mode }: { mode: "paper" | "live" }) {
       <PageHead
         eyebrow={mode === "live" ? "04 / Real-money desk" : "03 / Simulation desk"}
         title={mode === "live" ? "Live Trading" : "Paper Trading"}
-        description={mode === "live" ? "Real venue balances, reconciled positions, and explicit risk controls." : "Live public books, simulated execution, and independent event budgets."}
       />
       {mode === "live" ? <div className="live-ribbon">LIVE MONEY · ORDERS CAN REACH VENUES</div> : <div className="paper-ribbon">PAPER · SIMULATED EXECUTION</div>}
       {mode === "paper" ? (
         <section className="panel paper-config">
           <label>
-            Default paper bankroll for new sessions
+            Paper bankroll
             <div className="money-input">
               <span>$</span>
               <input
@@ -60,9 +59,7 @@ export function WorkersPage({ mode }: { mode: "paper" | "live" }) {
               />
             </div>
           </label>
-          <p>
-            This default is used when you start paper trading from My Markets. Each approved event still gets its own independent budget.
-          </p>
+          <span className="paper-config-note">Default for new paper sessions</span>
         </section>
       ) : null}
       {mode === "live" && balances.data?.errors.length ? (

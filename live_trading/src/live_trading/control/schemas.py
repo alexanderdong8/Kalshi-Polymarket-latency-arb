@@ -90,6 +90,7 @@ class MarketSuggestion(BaseModel):
     kalshi_outcomes: list[str] = Field(default_factory=list)
     polymarket_outcomes: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    source: str = "native"
 
 
 class ApprovalRequest(BaseModel):
