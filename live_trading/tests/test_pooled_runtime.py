@@ -6,14 +6,14 @@ from decimal import Decimal
 
 from live_trading.market_data.cache import CacheUpdate, SharedBookCache
 from live_trading.market_data.subscriptions import SubscriptionRegistry
-from live_trading.models import BookState
+from live_trading.models import BookState, Venue
 from live_trading.workers.assignment import WorkerAssignment
 from live_trading.workers.pool import StrategyWorkerPool
 
 
-def _book(key: str, sequence: int) -> BookState:
+def _book(key: str, sequence: int, venue: Venue = "kalshi") -> BookState:
     return BookState(
-        venue="kalshi",
+        venue=venue,
         market_key=key,
         yes_bid=Decimal("0.40"),
         yes_ask=Decimal("0.41"),
@@ -39,17 +39,29 @@ def test_subscription_registry_deduplicates_paper_and_live() -> None:
     assert registry.active() == set()
 
 
-def test_shared_cache_rejects_updates_after_sequence_gap_until_snapshot() -> None:
+def test_shared_cache_rejects_per_market_sequence_gaps_until_snapshot() -> None:
+    async def run() -> None:
+        cache = SharedBookCache()
+        assert (await cache.apply(_book("PM", 1, "polymarket_us"))).valid
+        gap = await cache.apply(_book("PM", 3, "polymarket_us"))
+        assert gap.gap == "1->3"
+        assert not gap.valid
+        assert await cache.get("polymarket_us", "PM") is None
+        snapshot = _book("PM", 10, "polymarket_us")
+        object.__setattr__(snapshot, "state", "snapshot")
+        assert (await cache.apply(snapshot)).valid
+        assert await cache.get("polymarket_us", "PM") is not None
+
+    asyncio.run(run())
+
+
+def test_shared_cache_keeps_kalshi_stream_scoped_sequence_updates_valid() -> None:
     async def run() -> None:
         cache = SharedBookCache()
         assert (await cache.apply(_book("KX", 1))).valid
-        gap = await cache.apply(_book("KX", 3))
-        assert gap.gap == "1->3"
-        assert not gap.valid
-        assert await cache.get("kalshi", "KX") is None
-        snapshot = _book("KX", 10)
-        object.__setattr__(snapshot, "state", "snapshot")
-        assert (await cache.apply(snapshot)).valid
+        update = await cache.apply(_book("KX", 5))
+        assert update.gap is None
+        assert update.valid
         assert await cache.get("kalshi", "KX") is not None
 
     asyncio.run(run())

@@ -24,8 +24,12 @@ class SharedBookCache:
         gap = None
         async with self._lock:
             previous = self._books.get(key)
+            # Kalshi sequence values are stream-scoped in practice, so interleaved
+            # updates for other markets must not invalidate this market's book.
+            check_market_sequence = book.venue != "kalshi"
             if (
-                previous is not None
+                check_market_sequence
+                and previous is not None
                 and previous.sequence is not None
                 and book.sequence is not None
                 and book.sequence > previous.sequence + 1

@@ -199,6 +199,30 @@ def create_app(
             result.append(await scanner.prepare_basket_entry(entry))
         return result
 
+    @app.post("/api/basket/approve-ready")
+    async def approve_ready_basket_entries() -> list[dict[str, Any]]:
+        approved = []
+        blocked = []
+        for payload in db.list("basket_entries"):
+            entry = BasketEntry.model_validate(payload)
+            if entry.status != "review_ready" or not entry.candidate_id:
+                continue
+            try:
+                watch = await _approve_candidate(
+                    db,
+                    control_root,
+                    hub,
+                    entry.candidate_id,
+                )
+                approved.append(watch)
+            except HTTPException as exc:
+                blocked.append(f"{entry.name}: {exc.detail}")
+        if blocked:
+            raise HTTPException(409, " ; ".join(blocked))
+        if not approved:
+            raise HTTPException(409, "No review-ready basket entries can be approved.")
+        return approved
+
     @app.get("/api/candidates", response_model=list[Candidate])
     async def candidates(
         query: str = "",
@@ -230,35 +254,9 @@ def create_app(
 
     @app.post("/api/candidates/{candidate_id}/approve")
     async def approve(candidate_id: str, request: ApprovalRequest) -> dict[str, Any]:
-        payload = _get_or_404(db, "candidates", candidate_id)
-        item = Candidate.model_validate(payload)
-        failed_checks = [key for key, passed in item.deterministic_checks.items() if not passed]
-        if failed_checks:
-            raise HTTPException(409, f"Deterministic checks failed: {', '.join(failed_checks)}")
-        if not item.exhaustive or not request.exhaustive or not request.settlement_reviewed:
+        if not request.exhaustive or not request.settlement_reviewed:
             raise HTTPException(409, "Complete, mutually exclusive, exhaustive outcomes must be reviewed.")
-        if item.llm_status != "passed":
-            raise HTTPException(409, f"LLM settlement review must pass; current status is {item.llm_status}.")
-        manifest_path, approval_version = write_manifest(
-            control_root / "approved_events", item.model_dump(mode="json")
-        )
-        slug = _slug(item.name)
-        watch = {
-            **item.model_dump(mode="json"),
-            "id": item.id,
-            "slug": slug,
-            "status": "approved",
-            "approval_version": approval_version,
-            "manifest_path": str(manifest_path),
-            "approved_at": utc_now(),
-            "active_modes": [],
-        }
-        db.put("watchlist", item.id, watch)
-        payload.update({"status": "approved"})
-        db.put("candidates", item.id, payload)
-        db.append_event("event.approved", watch)
-        await hub.publish("event.approved", watch)
-        return watch
+        return await _approve_candidate(db, control_root, hub, candidate_id)
 
     @app.get("/api/events")
     async def events() -> list[dict[str, Any]]:
@@ -520,6 +518,45 @@ def _get_or_404(db: ControlDatabase, table: str, key: str) -> dict[str, Any]:
     if payload is None:
         raise HTTPException(404, f"{table.rstrip('s').replace('_', ' ')} not found.")
     return payload
+
+
+async def _approve_candidate(
+    db: ControlDatabase,
+    control_root: Path,
+    hub: EventHub,
+    candidate_id: str,
+) -> dict[str, Any]:
+    payload = _get_or_404(db, "candidates", candidate_id)
+    item = Candidate.model_validate(payload)
+    failed_checks = [key for key, passed in item.deterministic_checks.items() if not passed]
+    if failed_checks:
+        raise HTTPException(409, f"Deterministic checks failed: {', '.join(failed_checks)}")
+    if not item.exhaustive:
+        raise HTTPException(409, "Complete, mutually exclusive, exhaustive outcomes must be reviewed.")
+    if item.llm_status != "passed":
+        raise HTTPException(409, f"LLM settlement review must pass; current status is {item.llm_status}.")
+    existing = db.get("watchlist", item.id)
+    if existing is not None:
+        return existing
+    manifest_path, approval_version = write_manifest(
+        control_root / "approved_events", item.model_dump(mode="json")
+    )
+    watch = {
+        **item.model_dump(mode="json"),
+        "id": item.id,
+        "slug": _slug(item.name),
+        "status": "approved",
+        "approval_version": approval_version,
+        "manifest_path": str(manifest_path),
+        "approved_at": utc_now(),
+        "active_modes": [],
+    }
+    db.put("watchlist", item.id, watch)
+    payload.update({"status": "approved"})
+    db.put("candidates", item.id, payload)
+    db.append_event("event.approved", watch)
+    await hub.publish("event.approved", watch)
+    return watch
 
 
 def uuid_like(prefix: str, value: str) -> str:

@@ -80,6 +80,17 @@ def test_pooled_paper_session_consumes_shared_updates(tmp_path, monkeypatch) -> 
         assert session.latest_evaluation is not None
         assert session.latest_evaluation.edge_per_share > 0
         assert len((await session.store.snapshot())) == 4
+        payload = session.latest_state["books"]["kalshi:A"]
+        assert payload["yes_bid"] == "0.19"
+        assert payload["yes_ask"] == "0.20"
+        assert payload["no_bid"] == "0.80"
+        assert payload["no_ask"] == "0.81"
+        assert payload["yes_bids"] == [["0.19", "500"]]
+        assert payload["yes_asks"] == [["0.20", "500"]]
+        assert payload["no_bids"] == [["0.80", "500"]]
+        assert payload["no_asks"] == [["0.81", "500"]]
+        assert payload["received_ts"]
+        assert payload["sequence"] == 1
         await session.close()
 
     asyncio.run(run())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
@@ -30,6 +31,8 @@ def market_variants_from_api(raw: dict[str, Any]) -> list[VenueMarket]:
 
     def variant(side: dict[str, Any], opposite: dict[str, Any], label: str) -> VenueMarket:
         enriched = {**raw, "outcome_side": label}
+        yes_label = _side_outcome_label(raw, side, label)
+        no_label = _side_outcome_label(raw, opposite, "short" if label == "long" else "long")
         return VenueMarket(
             venue="polymarket_us",
             market_id=f"{base_id}:{label}",
@@ -41,8 +44,8 @@ def market_variants_from_api(raw: dict[str, Any]) -> list[VenueMarket]:
             start_time=parse_ts(raw.get("gameStartTime") or raw.get("startDate")),
             close_time=parse_ts(raw.get("endDate") or raw.get("closeTime")),
             expiration_time=parse_ts(raw.get("endDate") or raw.get("expirationTime")),
-            yes_label=str(side.get("description") or ("Yes" if label == "long" else "No")),
-            no_label=str(opposite.get("description") or ("No" if label == "long" else "Yes")),
+            yes_label=yes_label,
+            no_label=no_label,
             yes_symbol=str(side.get("id") or f"{slug}:{label}"),
             no_symbol=str(opposite.get("id") or f"{slug}:{'short' if label == 'long' else 'long'}"),
             description=raw.get("description"),
@@ -109,7 +112,10 @@ class PolymarketUSClient:
             "offset": 0,
         }
         wanted = identifier.casefold()
-        title_wanted = (title or identifier).casefold().strip()
+        title_wanted = title or identifier
+        normalized_title = _normalize_event_text(title_wanted)
+        wanted_tokens = _event_tokens(title_wanted)
+        best_fuzzy: tuple[float, list[VenueMarket]] | None = None
         async with aiohttp.ClientSession() as session:
             for _page in range(30):
                 url = f"{self.settings.polymarket_gateway_base.rstrip('/')}/v1/events?{urlencode(params)}"
@@ -123,19 +129,25 @@ class PolymarketUSClient:
                         str(raw.get("ticker") or "").casefold(),
                         str(raw.get("slug") or "").casefold(),
                     }
-                    event_title = str(raw.get("title") or raw.get("description") or "").casefold()
+                    event_title = str(raw.get("title") or raw.get("description") or "")
+                    markets = [
+                        variant
+                        for market in raw.get("markets") or []
+                        for variant in market_variants_from_api(market)
+                    ]
                     if (
                         (wanted and wanted in values)
-                        or (title_wanted and event_title == title_wanted)
+                        or (normalized_title and _normalize_event_text(event_title) == normalized_title)
                     ):
-                        return [
-                            variant
-                            for market in raw.get("markets") or []
-                            for variant in market_variants_from_api(market)
-                        ]
+                        return _event_outcome_markets(raw, markets)
+                    score = _event_title_score(wanted_tokens, event_title)
+                    if score >= 0.82 and (best_fuzzy is None or score > best_fuzzy[0]):
+                        best_fuzzy = (score, _event_outcome_markets(raw, markets))
                 if len(rows) < int(params["limit"]):
                     break
                 params["offset"] = int(params["offset"]) + int(params["limit"])
+        if best_fuzzy is not None:
+            return best_fuzzy[1]
         return []
 
     async def fetch_book(self, slug: str) -> BookState:
@@ -252,3 +264,86 @@ def _recent_marker(market: VenueMarket) -> datetime | None:
         if marker is not None:
             return marker
     return market.start_time or market.close_time or market.expiration_time
+
+
+def _event_outcome_markets(raw_event: dict[str, Any], markets: list[VenueMarket]) -> list[VenueMarket]:
+    if len(raw_event.get("markets") or []) <= 1:
+        return markets
+    long_only = [row for row in markets if row.raw.get("outcome_side") == "long"]
+    return long_only or markets
+
+
+def _side_outcome_label(raw: dict[str, Any], side: dict[str, Any], label: str) -> str:
+    description = str(side.get("description") or "").strip()
+    if description and description.casefold() not in {"yes", "no"}:
+        return description
+    team = side.get("team") if isinstance(side.get("team"), dict) else {}
+    team_name = str(team.get("name") or team.get("safeName") or "").strip()
+    if team_name:
+        return team_name
+    if label == "long":
+        question_label = _outcome_from_question(
+            str(raw.get("question") or raw.get("title") or raw.get("slug") or "")
+        )
+        if question_label:
+            return question_label
+    return description or ("Yes" if label == "long" else "No")
+
+
+def _outcome_from_question(question: str) -> str | None:
+    lowered = question.casefold()
+    if " end in a draw" in lowered or " end in draw" in lowered:
+        return "Tie"
+    match = re.search(r"will\s+(.+?)\s+win\b", question, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+_TOKEN_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "at",
+    "by",
+    "for",
+    "game",
+    "in",
+    "market",
+    "match",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "v",
+    "versus",
+    "vs",
+    "will",
+    "win",
+    "winner",
+}
+
+
+def _normalize_event_text(value: str | None) -> str:
+    text = str(value or "").casefold()
+    text = re.sub(r"\bvs\.?\b|\bv\.?\b|\bversus\b", " vs ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+def _event_tokens(value: str | None) -> set[str]:
+    return {
+        token
+        for token in _normalize_event_text(value).split()
+        if token not in _TOKEN_STOPWORDS and len(token) >= 2
+    }
+
+
+def _event_title_score(wanted_tokens: set[str], event_title: str | None) -> float:
+    if not wanted_tokens:
+        return 0
+    event_tokens = _event_tokens(event_title)
+    if not event_tokens:
+        return 0
+    return len(wanted_tokens & event_tokens) / max(len(wanted_tokens), 1)

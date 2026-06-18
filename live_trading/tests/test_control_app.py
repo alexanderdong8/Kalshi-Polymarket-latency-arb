@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from live_trading.control.app import create_app
 from live_trading.control.db import ControlDatabase
+from live_trading.control.llm_matcher import MappingReview
 from live_trading.control.schemas import Candidate, OutcomeMapping, RankingBreakdown, WorkerState
 from live_trading.models import VenueMarket
 
@@ -19,6 +20,12 @@ def test_health_and_settings_do_not_expose_secrets(tmp_path):
         payload = client.get("/api/settings").json()
         assert set(payload["credentials"]) == {"kalshi", "polymarket_us"}
         assert "secret" not in str(payload).lower()
+
+
+def test_llm_review_schema_is_strict_for_openai_structured_outputs():
+    schema = MappingReview.model_json_schema()
+
+    assert schema["additionalProperties"] is False
 
 
 def test_startup_marks_abandoned_scan_jobs_failed(tmp_path):
@@ -251,7 +258,7 @@ def test_search_add_prepare_approve_flow_does_not_create_scan_jobs(tmp_path, mon
                 _venue_market("kalshi", "K-BOS", "Lakers vs Celtics winner", "Celtics", "K"),
             ]
 
-    async def direct_gamma(_slug):
+    async def direct_polymarket(_settings, _identifier, _title):
         return [
             _venue_market(
                 "polymarket_us",
@@ -271,17 +278,11 @@ def test_search_add_prepare_approve_flow_does_not_create_scan_jobs(tmp_path, mon
             ),
         ]
 
-    class FakeLLM:
+    class FailingLLM:
         available = True
 
         async def review(self, _payload):
-            return SimpleNamespace(
-                equivalent_event=True,
-                exhaustive_outcomes=True,
-                confidence=0.99,
-                reasoning="Equivalent event and settlement scope.",
-                warnings=[],
-            )
+            raise AssertionError("Oddpool provider-matched events should not call LLM review.")
 
     async def fake_hydrate(self, candidate, _pair):
         candidate.ranking.mapping_confidence = 0.99
@@ -289,11 +290,11 @@ def test_search_add_prepare_approve_flow_does_not_create_scan_jobs(tmp_path, mon
     import live_trading.scanner.service as scanner_service
 
     monkeypatch.setattr(scanner_service, "KalshiClient", DirectKalshi)
-    monkeypatch.setattr(scanner_service, "_fetch_polymarket_gamma_event_markets", direct_gamma)
+    monkeypatch.setattr(scanner_service, "_fetch_preferred_polymarket_markets", direct_polymarket)
 
     with TestClient(app) as client:
         app.state.scanner.oddpool = FakeOddpool()
-        app.state.scanner.llm = FakeLLM()
+        app.state.scanner.llm = FailingLLM()
         app.state.scanner._hydrate_market_quality = MethodType(
             fake_hydrate, app.state.scanner
         )
@@ -340,8 +341,7 @@ def test_search_add_prepare_approve_flow_does_not_create_scan_jobs(tmp_path, mon
         assert candidate["llm_status"] == "passed"
 
         approved = client.post(
-            f"/api/candidates/{candidate_id}/approve",
-            json={"exhaustive": True, "settlement_reviewed": True},
+            "/api/basket/approve-ready",
         )
         assert approved.status_code == 200
         assert client.get("/api/events").json()[0]["id"] == candidate_id
@@ -415,7 +415,7 @@ def test_prepare_review_prefers_direct_venue_fetch_over_oddpool(tmp_path, monkey
                 _venue_market("kalshi", "K-TIE", "Iraq vs Norway Winner?", "Tie", "K"),
             ]
 
-    async def direct_gamma(_slug):
+    async def direct_polymarket(_settings, _identifier, _title):
         return [
             _venue_market(
                 "polymarket_us",
@@ -443,17 +443,11 @@ def test_prepare_review_prefers_direct_venue_fetch_over_oddpool(tmp_path, monkey
             ),
         ]
 
-    class FakeLLM:
+    class FailingLLM:
         available = True
 
         async def review(self, _payload):
-            return SimpleNamespace(
-                equivalent_event=True,
-                exhaustive_outcomes=True,
-                confidence=0.99,
-                reasoning="Equivalent event and settlement scope.",
-                warnings=[],
-            )
+            raise AssertionError("Oddpool provider-matched events should not call LLM review.")
 
     async def fake_hydrate(self, candidate, _pair):
         candidate.ranking.mapping_confidence = 0.99
@@ -461,11 +455,11 @@ def test_prepare_review_prefers_direct_venue_fetch_over_oddpool(tmp_path, monkey
     import live_trading.scanner.service as scanner_service
 
     monkeypatch.setattr(scanner_service, "KalshiClient", DirectKalshi)
-    monkeypatch.setattr(scanner_service, "_fetch_polymarket_gamma_event_markets", direct_gamma)
+    monkeypatch.setattr(scanner_service, "_fetch_preferred_polymarket_markets", direct_polymarket)
 
     with TestClient(app) as client:
         app.state.scanner.oddpool = FailingOddpool()
-        app.state.scanner.llm = FakeLLM()
+        app.state.scanner.llm = FailingLLM()
         app.state.scanner._hydrate_market_quality = MethodType(
             fake_hydrate, app.state.scanner
         )
@@ -494,6 +488,8 @@ def test_prepare_review_prefers_direct_venue_fetch_over_oddpool(tmp_path, monkey
         assert prepared.json()["status"] == "review_ready"
         candidate = client.get(f"/api/candidates/{prepared.json()['candidate_id']}").json()
         assert candidate["exhaustive"] is True
+        assert candidate["llm_status"] == "passed"
+        assert "Oddpool returned matched Kalshi and Polymarket event identifiers" in candidate["llm_reasoning"]
         assert len(candidate["mappings"]) == 3
         assert {row["name"] for row in candidate["mappings"]} == {"Iraq", "Norway", "Tie"}
 

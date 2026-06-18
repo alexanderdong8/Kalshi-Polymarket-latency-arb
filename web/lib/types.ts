@@ -114,6 +114,42 @@ export type MarketEvent = Candidate & {
   offline_intervals?: { started_at: string; ended_at: string | null }[];
 };
 
+export type PriceLevel = [string, string];
+
+export type RuntimeBook = {
+  venue: "kalshi" | "polymarket_us";
+  outcome: string;
+  market_key?: string;
+  age_ms?: number;
+  received_ts?: string | null;
+  venue_ts?: string | null;
+  sequence?: number | null;
+  state?: string | null;
+  yes_bid?: string | null;
+  yes_ask?: string | null;
+  no_bid?: string | null;
+  no_ask?: string | null;
+  yes_bids?: PriceLevel[];
+  yes_asks?: PriceLevel[];
+  no_bids?: PriceLevel[];
+  no_asks?: PriceLevel[];
+  bids?: PriceLevel[];
+  asks?: PriceLevel[];
+};
+
+export type RuntimeState = {
+  mode?: string;
+  event?: string;
+  capital_limit?: string;
+  timestamp?: string;
+  stream_health?: Record<string, number>;
+  evaluation?: Record<string, string | number | boolean | null> | null;
+  books?: Record<string, RuntimeBook>;
+  positions?: unknown[];
+  realized_pnl?: string;
+  [key: string]: unknown;
+};
+
 export type Worker = {
   id: string;
   event_id: string;
@@ -125,7 +161,12 @@ export type Worker = {
   started_at?: string | null;
   heartbeat_at?: string | null;
   pause_reason?: string | null;
-  state: Record<string, unknown>;
+  state: RuntimeState;
+};
+
+export type StreamMessage<T = unknown> = {
+  topic: string;
+  payload: T;
 };
 
 export type ScanJob = {

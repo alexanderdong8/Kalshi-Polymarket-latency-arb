@@ -100,8 +100,23 @@ export default function DiscoverPage() {
       client.invalidateQueries({ queryKey: ["candidates"] });
     },
   });
-  const filtered = useMemo(() => candidates.data ?? [], [candidates.data]);
-  const basketRows = basket.data ?? [];
+  const approveReady = useMutation({
+    mutationFn: () => api<Candidate[]>("/basket/approve-ready", { method: "POST" }),
+    onSuccess: () => {
+      client.invalidateQueries();
+    },
+  });
+  const basketRows = useMemo(() => basket.data ?? [], [basket.data]);
+  const basketCandidateIds = useMemo(
+    () => new Set(basketRows.map((row) => row.candidate_id).filter(Boolean)),
+    [basketRows],
+  );
+  const reviewCandidates = useMemo(
+    () => (candidates.data ?? []).filter((candidate) => basketCandidateIds.has(candidate.id)),
+    [basketCandidateIds, candidates.data],
+  );
+  const readyCount = basketRows.filter((row) => row.status === "review_ready" && row.candidate_id).length;
+  const preparingCount = basketRows.filter((row) => row.status === "preparing").length;
 
   useEffect(() => {
     if (currentScan?.status === "complete" || currentScan?.status === "failed") {
@@ -179,8 +194,11 @@ export default function DiscoverPage() {
             <h2>Trading basket</h2>
           </div>
           <div className="basket-actions">
+            <button className="button compact" onClick={() => approveReady.mutate()} disabled={!readyCount || approveReady.isPending || preparingCount > 0}>
+              <Check size={14} /> {approveReady.isPending ? "Confirming..." : `Confirm ready list (${readyCount})`}
+            </button>
             <button className="button primary compact" onClick={() => prepareBasket.mutate()} disabled={!basketRows.length || prepareBasket.isPending}>
-              <Sparkles size={14} /> {prepareBasket.isPending ? "Preparing..." : "Prepare all for review"}
+              <Sparkles size={14} /> {prepareBasket.isPending ? "Preparing..." : "Prepare selected list"}
             </button>
           </div>
         </div>
@@ -194,18 +212,21 @@ export default function DiscoverPage() {
                   <span>
                     <b>{item.name}</b>
                     <small>
-                      {item.category ?? "Uncategorized"} · {item.outcome_count || "—"} markets · {(item.mapping_confidence * 100).toFixed(0)}% match · {item.source}
+                      {item.category ?? "Uncategorized"} · {item.outcome_count || "—"} markets · {(item.mapping_confidence * 100).toFixed(0)}% match
                     </small>
                   </span>
-                  <span className="suggestion-books">
-                    {item.venues.join(" + ") || "Venue match pending"} · Kalshi: {item.kalshi_outcomes.slice(0, 2).join(" / ") || "pending"} · Polymarket: {item.polymarket_outcomes.slice(0, 2).join(" / ") || "pending"}
+                  <span className="basket-compact-meta">
+                    {item.venues.join(" + ") || "Venue match pending"}
+                    {item.status_reason ? <small>{item.status_reason}</small> : null}
                   </span>
                   <span className={`basket-status ${item.status}`}>
                     {basketStatusLabel(item)}
                   </span>
-                  <button className="button compact" onClick={() => prepareEntry.mutate(item.id)} disabled={item.status === "preparing" || prepareEntry.isPending}>
-                    <Sparkles size={14} /> {item.status === "review_ready" ? "Refresh review" : "Prepare review"}
-                  </button>
+                  {item.status !== "selected" && item.status !== "review_ready" ? (
+                    <button className="button compact" onClick={() => prepareEntry.mutate(item.id)} disabled={item.status === "preparing" || prepareEntry.isPending}>
+                      Retry
+                    </button>
+                  ) : <span />}
                   <button className="icon-button" onClick={() => removeBasket.mutate(item.id)} aria-label={`Remove ${item.name}`}>
                     <Trash2 size={14} />
                   </button>
@@ -215,6 +236,7 @@ export default function DiscoverPage() {
           ) : (
             <p className="suggestion-empty">Add events from search results. Nothing is scanned or refreshed until you choose Prepare review.</p>
           )}
+        {approveReady.error ? <p className="form-error">{approveReady.error.message}</p> : null}
       </section>
       {currentScan ? (
         <section className="scan-strip">
@@ -227,39 +249,34 @@ export default function DiscoverPage() {
           <small>{currentScan.candidate_count} review-ready candidates · {activeScans.length || 1} scan{(activeScans.length || 1) === 1 ? "" : "s"}</small>
         </section>
       ) : null}
-      {filtered.length ? (
-        <div className="candidate-grid">
-          {filtered.map((candidate, index) => (
-            <article className="candidate-card reveal" style={{ animationDelay: `${index * 45}ms` }} key={candidate.id}>
-              <div className="candidate-topline">
-                <span>{candidate.category ?? "Uncategorized"}</span>
-                <StatusBadge value={candidate.llm_status} />
-              </div>
-              <h2>{candidate.name}</h2>
-              <p>{candidate.description || "Settlement details available in event review."}</p>
-              <div className="score-grid">
-                <span><small>Expected profit</small><b>{money(candidate.ranking.expected_deployable_profit)}</b></span>
-                <span><small>Executable now</small><b>{money(candidate.ranking.executable_profit)}</b></span>
-                <span><small>Completion estimate</small><b>{pct(candidate.ranking.completion_probability)}</b></span>
-                <span><small>Deployable size</small><b>{candidate.ranking.selected_size || "—"}</b></span>
-              </div>
-              <p className="evidence-line">
-                {candidate.ranking.event_state.replaceAll("_", " ")} · {candidate.ranking.evidence_label}
-              </p>
-              <div className="candidate-footer">
-                <span className={candidate.exhaustive ? "coverage good" : "coverage"}>
-                  {candidate.exhaustive ? "Complete coverage" : "Coverage warning"}
+      {reviewCandidates.length ? (
+        <section className="review-list-panel reveal">
+          <div className="basket-title">
+            <div>
+              <p className="eyebrow">Ready to confirm</p>
+              <h2>Reviewed basket matches</h2>
+            </div>
+            <span className="review-list-count">{reviewCandidates.length} event{reviewCandidates.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="review-list">
+            {reviewCandidates.map((candidate) => (
+              <div className="review-row" key={candidate.id}>
+                <span>
+                  <b>{candidate.name}</b>
+                  <small>{candidate.mappings.length} outcomes · {candidate.exhaustive ? "complete coverage" : "coverage warning"} · {candidate.ranking.evidence_label}</small>
                 </span>
+                <span className="score-pill">{money(candidate.ranking.expected_deployable_profit)} expected</span>
+                <StatusBadge value={candidate.llm_status} />
                 <button className="text-button" onClick={() => setSelected(candidate)}>
-                  Review event <ArrowRight size={14} />
+                  Inspect <ArrowRight size={14} />
                 </button>
               </div>
-            </article>
-          ))}
-        </div>
+            ))}
+          </div>
+        </section>
       ) : (
-        <EmptyState title="No review-ready events yet">
-          Search for events, add them to the Trading Basket, then prepare them for review. Approved events appear in My Markets.
+        <EmptyState title="No prepared matches yet">
+          Add events to the Trading Basket, then prepare the selected list. Ready matches can be confirmed together and moved to My Markets.
         </EmptyState>
       )}
       {selected ? <ReviewDialog candidate={selected} onClose={() => setSelected(null)} /> : null}

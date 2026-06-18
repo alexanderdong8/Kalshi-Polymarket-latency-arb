@@ -4,10 +4,12 @@ import json
 import os
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class MappingReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     equivalent_event: bool
     exhaustive_outcomes: bool
     confidence: float = Field(ge=0, le=1)

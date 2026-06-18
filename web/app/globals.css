@@ -77,15 +77,17 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .suggestion-row small, .suggestion-books, .suggestion-empty { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .suggestion-books { font-family: var(--font-mono), monospace; }
 .suggestion-empty { margin: 0; padding: 14px 16px; }
-.basket-panel { border: 1px solid var(--line); background: var(--surface); margin: 18px 0 20px; box-shadow: var(--shadow); }
+.basket-panel, .review-list-panel { border: 1px solid var(--line); background: var(--surface); margin: 18px 0 20px; box-shadow: var(--shadow); }
 .basket-title { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .basket-title h2 { margin: 0; font-size: 22px; }
 .basket-actions { display: flex; align-items: center; gap: 8px; }
 .basket-list { display: grid; }
-.basket-row { display: grid; grid-template-columns: minmax(260px, .85fr) minmax(280px, 1fr) minmax(150px, auto) auto auto; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.basket-row { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(180px, .55fr) minmax(140px, auto) 80px 34px; align-items: center; gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .basket-row:last-child { border-bottom: 0; }
 .basket-row b { display: block; margin-bottom: 4px; }
 .basket-row small { color: var(--muted); font-size: 12px; }
+.basket-compact-meta { color: var(--muted); font: 500 11px/1.45 var(--font-mono), monospace; text-transform: uppercase; }
+.basket-compact-meta small { display: block; margin-top: 4px; font: 12px/1.35 var(--font-body), sans-serif; text-transform: none; }
 .basket-status { justify-self: start; max-width: 260px; border: 1px solid var(--line); background: #f5f2ea; color: #675f4f; padding: 7px 9px; font: 600 9px/1.35 var(--font-mono), monospace; text-transform: uppercase; }
 .basket-status.review_ready { color: var(--green); background: var(--green-pale); border-color: #bdd8c9; }
 .basket-status.preparing { color: var(--amber); background: #fff6e4; border-color: #dfbd82; }
@@ -122,6 +124,13 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .coverage { font-size: 10px; color: var(--amber); }
 .coverage.good { color: var(--green); }
 .text-button { border: 0; background: transparent; color: var(--green); display: inline-flex; gap: 6px; align-items: center; font-weight: 700; padding: 0; }
+.review-list-count { color: var(--muted); font: 500 10px var(--font-mono), monospace; text-transform: uppercase; }
+.review-list { display: grid; }
+.review-row { display: grid; grid-template-columns: minmax(280px, 1fr) auto auto auto; align-items: center; gap: 18px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+.review-row:last-child { border-bottom: 0; }
+.review-row b { display: block; margin-bottom: 4px; }
+.review-row small { color: var(--muted); font-size: 12px; }
+.score-pill { border: 1px solid var(--line); background: #f5f2ea; padding: 7px 9px; font: 600 10px var(--font-mono), monospace; color: var(--green); white-space: nowrap; }
 .status { display: inline-flex; align-items: center; gap: 5px; width: fit-content; padding: 4px 7px; border: 1px solid; font: 600 9px var(--font-mono), monospace; text-transform: uppercase; white-space: nowrap; }
 .status.good { color: var(--green); background: var(--green-pale); border-color: #bdd8c9; }
 .status.bad { color: var(--red); background: var(--red-pale); border-color: #e8c1bd; }
@@ -206,6 +215,7 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .paper-config-note { color: var(--muted); font-size: 13px; padding-bottom: 12px; }
 .panel { background: var(--surface); border: 1px solid var(--line); }
 .chart-panel { margin-bottom: 16px; min-width: 0; overflow: hidden; }
+.event-chart-panel { align-self: start; }
 .table-panel { margin-top: 16px; }
 .panel-title { display: flex; justify-content: space-between; align-items: center; padding: 18px 19px; border-bottom: 1px solid var(--line); }
 .panel-title h2 { font: 500 22px var(--font-display), serif; margin: 0; }
@@ -239,12 +249,29 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
 .outcome-tabs { display: flex; gap: 5px; overflow-x: auto; margin: 18px 0 12px; padding-bottom: 4px; }
 .outcome-tabs button { border: 1px solid var(--line); background: var(--surface); padding: 9px 13px; white-space: nowrap; }
 .outcome-tabs button.active { color: white; background: var(--green); border-color: var(--green); }
+.price-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; }
+.price-tile { border: 1px solid var(--line); background: var(--surface); padding: 14px; min-width: 0; }
+.price-tile span { display: block; color: var(--muted); font: 600 9px var(--font-mono), monospace; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 7px; }
+.price-tile b { display: block; font: 500 26px var(--font-display), serif; }
+.price-tile small { display: block; margin-top: 5px; color: var(--muted); font: 500 10px/1.4 var(--font-mono), monospace; }
+.window-toggle { display: flex; gap: 5px; }
+.window-toggle button { border: 1px solid var(--line); background: transparent; padding: 7px 10px; color: var(--muted); font: 700 10px var(--font-mono), monospace; }
+.window-toggle button.active { color: white; background: var(--green); border-color: var(--green); }
+.stream-health { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); }
+.stream-health span { padding: 10px 12px; border-right: 1px solid var(--line); color: var(--muted); font: 600 9px var(--font-mono), monospace; text-transform: uppercase; }
+.stream-health span:last-child { border-right: 0; }
+.stream-health b { color: var(--ink); }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(420px, .75fr); gap: 15px; }
 .orderbook-panel { min-width: 0; }
 .book-columns { display: grid; grid-template-columns: 1fr 1fr; }
+.venue-book-grid { display: grid; gap: 12px; padding: 12px; }
+.venue-book { border: 1px solid var(--line); background: #fffdf8; }
+.venue-book > h3 { font: 500 18px var(--font-display), serif; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.side-book-grid { display: grid; grid-template-columns: 1fr 1fr; }
 .book { border-right: 1px solid var(--line); min-width: 0; padding-bottom: 12px; }
 .book:last-child { border: 0; }
 .book h3 { font: 500 17px var(--font-display), serif; padding: 13px 14px; margin: 0; border-bottom: 1px solid var(--line); }
+.side-book h4 { font: 600 10px var(--font-mono), monospace; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 10px 13px; margin: 0; border-bottom: 1px solid var(--line); }
 .book-head, .book-row { display: grid; grid-template-columns: 1fr 1fr; padding: 6px 13px; font: 500 10px var(--font-mono), monospace; }
 .book-head { color: var(--muted); text-transform: uppercase; }
 .book-row span:last-child, .book-head span:last-child { text-align: right; }
@@ -278,10 +305,11 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
   .page-wrap { padding: 28px 17px 60px; }
   .page-head { align-items: flex-start; flex-direction: column; }
   .candidate-grid, .settings-grid { grid-template-columns: 1fr; }
+  .price-strip, .stream-health { grid-template-columns: 1fr 1fr; }
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .metric:nth-child(2) { border-right: 0; }
   .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
-  .scan-strip, .job-strip, .run-bar, .suggestion-row, .basket-row, .paper-config { grid-template-columns: 1fr; }
+  .scan-strip, .job-strip, .run-bar, .suggestion-row, .basket-row, .review-row, .paper-config { grid-template-columns: 1fr; }
   .basket-title { align-items: flex-start; flex-direction: column; }
   .market-facts { grid-template-columns: 1fr 1fr; }
   .market-row { padding-inline: 0; }
@@ -296,6 +324,7 @@ h1 { font: 500 clamp(36px, 4vw, 60px)/.98 var(--font-display), serif; letter-spa
   .candidate-grid { display: block; }
   .candidate-card { margin-bottom: 12px; }
   .metrics-grid, .book-columns { grid-template-columns: 1fr; }
+  .price-strip, .side-book-grid, .stream-health { grid-template-columns: 1fr; }
   .metric { border-right: 0; border-bottom: 1px solid var(--line); }
   .market-row { display: block; }
   .market-facts, .market-actions { margin-top: 16px; }

@@ -30,6 +30,7 @@ from .strategy.execution.models import BasketAttempt, ExitAttempt
 from .strategy.execution.positions import PositionStore, build_open_basket_from_attempt
 from .strategy.fees import FeeConfig
 from .strategy.manifest import load_event_manifest
+from .strategy.models import BookSnapshot, DepthLevel
 
 
 class PooledEventSession:
@@ -228,13 +229,7 @@ class PooledEventSession:
                 "stream_health": self.stream_health,
                 "evaluation": _evaluation_payload(self.latest_evaluation),
                 "books": {
-                    f"{venue}:{outcome}": {
-                        "venue": venue,
-                        "outcome": outcome,
-                        "age_ms": book.age_seconds() * 1000,
-                        "bids": [[str(level.price), str(level.size)] for level in book.yes_bids],
-                        "asks": [[str(level.price), str(level.size)] for level in book.yes_asks],
-                    }
+                    f"{venue}:{outcome}": _book_payload(venue, outcome, book)
                     for (venue, outcome), book in books.items()
                 },
                 "attempts": [_json_default(row) for row in self.attempts[-100:]],
@@ -270,3 +265,42 @@ class PooledEventSession:
                 },
                 status="closed",
             )
+
+
+def _book_payload(venue: str, outcome: str, book: BookSnapshot) -> dict[str, Any]:
+    no_bids = tuple(
+        DepthLevel(Decimal("1") - level.price, level.size)
+        for level in book.yes_asks
+    )
+    no_asks = tuple(
+        DepthLevel(Decimal("1") - level.price, level.size)
+        for level in book.yes_bids
+    )
+    best_yes_bid = book.best_yes_bid
+    best_yes_ask = book.best_yes_ask
+    best_no_bid = no_bids[0] if no_bids else None
+    best_no_ask = no_asks[0] if no_asks else None
+    return {
+        "venue": venue,
+        "outcome": outcome,
+        "market_key": book.market_key,
+        "age_ms": book.age_seconds() * 1000,
+        "received_ts": book.received_ts.isoformat(),
+        "venue_ts": book.venue_ts.isoformat() if book.venue_ts else None,
+        "sequence": book.sequence,
+        "state": book.state,
+        "yes_bid": str(best_yes_bid.price) if best_yes_bid else None,
+        "yes_ask": str(best_yes_ask.price) if best_yes_ask else None,
+        "no_bid": str(best_no_bid.price) if best_no_bid else None,
+        "no_ask": str(best_no_ask.price) if best_no_ask else None,
+        "yes_bids": _depth_payload(book.yes_bids),
+        "yes_asks": _depth_payload(book.yes_asks),
+        "no_bids": _depth_payload(no_bids),
+        "no_asks": _depth_payload(no_asks),
+        "bids": _depth_payload(book.yes_bids),
+        "asks": _depth_payload(book.yes_asks),
+    }
+
+
+def _depth_payload(levels: tuple[DepthLevel, ...]) -> list[list[str]]:
+    return [[str(level.price), str(level.size)] for level in levels]

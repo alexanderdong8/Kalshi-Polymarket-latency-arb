@@ -346,15 +346,25 @@ class ScannerService:
             return None
         pair = pairs[0]
         candidate = self._candidate(pair)
-        if timing_warning:
+        provider_matched = _provider_matched_entry(entry)
+        if timing_warning and not provider_matched:
             candidate.warnings.append(timing_warning)
-        if any(
+        if provider_matched:
+            candidate.warnings = [
+                warning
+                for warning in candidate.warnings
+                if warning != "Missing comparable event time."
+            ]
+        uses_polymarket_international = any(
             market.raw.get("venue_source") == "polymarket_international_gamma"
             for market in polymarket
-        ):
+        )
+        if uses_polymarket_international:
             candidate.warnings.append(
-                "This matched Polymarket international Gamma data, not Polymarket US. "
-                "Live Polymarket US trading requires a corresponding Polymarket US market."
+                "Oddpool resolved this event to Kalshi plus Polymarket CLOB/international. "
+                "The official Polymarket US catalog did not return a corresponding active event "
+                "by id, slug, or participant/title match, so live Polymarket US trading is blocked "
+                "until a US market is found."
             )
         if not candidate.exhaustive:
             await self._block_basket_entry(
@@ -364,12 +374,29 @@ class ScannerService:
                 or "Outcome matching did not cover every market on both venues.",
             )
             return None
-        await self._review(candidate)
-        try:
-            await self._hydrate_market_quality(candidate, pair)
-        except Exception as exc:
-            candidate.warnings.append(f"Executable L2 snapshot unavailable: {exc}")
-            candidate.ranking.exclusion_reasons.append("Current complete L2 data is unavailable.")
+        if provider_matched:
+            candidate.llm_status = "passed"
+            candidate.llm_confidence = max(
+                float(pair.confidence),
+                float(entry.mapping_confidence or 0),
+            )
+            candidate.llm_reasoning = (
+                "Oddpool returned matched Kalshi and Polymarket event identifiers. "
+                "Prepare review fetched those exact venue events directly and verified complete, "
+                "unique outcome coverage."
+            )
+        else:
+            await self._review(candidate)
+        if uses_polymarket_international:
+            candidate.ranking.exclusion_reasons.append(
+                "Current Polymarket US L2 is unavailable for this international Polymarket match."
+            )
+        else:
+            try:
+                await self._hydrate_market_quality(candidate, pair)
+            except Exception as exc:
+                candidate.warnings.append(f"Executable L2 snapshot unavailable: {exc}")
+                candidate.ranking.exclusion_reasons.append("Current complete L2 data is unavailable.")
         candidate.status = "needs_review"
         self.repository.put_candidate(candidate.id, candidate.model_dump(mode="json"))
         await self.hub.publish("candidate.updated", candidate.model_dump(mode="json"))
@@ -392,8 +419,14 @@ class ScannerService:
                 )
             )
         poly_id = entry.provider_event_ids.get("polymarket")
-        if poly_id:
-            requests.append(_fetch_polymarket_gamma_event_markets(poly_id))
+        if poly_id and not poly_us_id:
+            requests.append(
+                _fetch_preferred_polymarket_markets(
+                    self.settings,
+                    poly_id,
+                    entry.name,
+                )
+            )
         if not requests:
             return []
         results = await asyncio.gather(*requests, return_exceptions=True)
@@ -676,6 +709,17 @@ def _supported_exchange(row: dict[str, Any]) -> bool:
     return _oddpool_exchange(row) in {"kalshi", "polymarket"}
 
 
+def _provider_matched_entry(entry: BasketEntry) -> bool:
+    venues = {venue.casefold() for venue in entry.venues}
+    event_ids = {key.casefold() for key in entry.provider_event_ids}
+    has_kalshi = "kalshi" in event_ids
+    has_poly = bool({"polymarket", "polymarket_us", "polymarket-us"} & event_ids)
+    provider_says_both = "kalshi" in venues and bool(
+        {"polymarket", "polymarket_us", "polymarket-us"} & venues
+    )
+    return entry.source == "oddpool" and has_kalshi and has_poly and provider_says_both
+
+
 def _oddpool_exchange(row: dict[str, Any]) -> str:
     return str(row.get("exchange") or row.get("venue") or "").casefold()
 
@@ -795,6 +839,20 @@ async def _fetch_polymarket_gamma_event_markets(slug: str) -> list[VenueMarket]:
         _gamma_market(row, event_title=title, event_slug=slug)
         for row in event.get("markets") or []
     ]
+
+
+async def _fetch_preferred_polymarket_markets(
+    settings: Settings,
+    identifier: str,
+    title: str,
+) -> list[VenueMarket]:
+    us_markets = await PolymarketUSClient(settings).fetch_event_markets(
+        identifier,
+        title=title,
+    )
+    if us_markets:
+        return us_markets
+    return await _fetch_polymarket_gamma_event_markets(identifier)
 
 
 def _gamma_market(row: dict[str, Any], *, event_title: str, event_slug: str) -> VenueMarket:
